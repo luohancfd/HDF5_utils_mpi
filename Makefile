@@ -6,10 +6,14 @@ FC = gfortran
 # >>> git tag -a v1.4 -m "my version 1.4"
 GIT_VERSION := $(shell git describe --abbrev=4 --dirty --always --tags)
 
+# add hdf5 support
+LDFLAGS = `pkg-config hdf5 --libs` -lhdf5_fortran
+FFLAGS = `pkg-config hdf5 --cflags`
+
 ifeq ($(FC),gfortran)
 
   #FFLAGS = -O2
-  FFLAGS = -O0 -Wall -fcheck=all
+  FFLAGS += -O0 -Wall -fcheck=all
   #FFLAGS = -O0 -Wall -fcheck=all -fbacktrace -ffpe-trap=zero,overflow,underflow
   #FFLAGS = -O0 -Wall -Wextra -Wimplicit-interface -fPIC -fmax-errors=1 -g -fcheck=all -fbacktrace
   #FFLAGS = -O3 -Wall -Wextra -Wimplicit-interface -fcheck=all -fbacktrace -ffpe-trap=zero,overflow,underflow,denormal
@@ -19,46 +23,29 @@ ifeq ($(FC),gfortran)
 endif
 ifeq ($(FC),ifort)
 
-  FFLAGS = -O2
+  FFLAGS += -O0
   #FFLAGS = -Ofast
 
   FFLAGS += -fpp -DVERSION=\"$(GIT_VERSION)\"
 
 endif
 
+FFLAGS += -g
 
-
-# add hdf5 support
-LDLIBS = -lhdf5_fortran -lhdf5
-
-# add include and library paths on Mac (for Macports paths)
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
-  LDINC = -I/opt/local/include
-  LDFLAGS = -L/opt/local/lib
-endif
-
-# add include and library paths on my linux mint laptop
-UNAME_N := $(shell uname -n)
-ifeq ($(UNAME_N),justintnb-lm)
-  LDINC = -I/usr/include/hdf5/serial
-  LDFLAGS = -L/usr/lib/x86_64-linux-gnu/hdf5/serial
-endif
-
-
+$(info $(FFLAGS))
 
 
 
 .PHONY: clean docs
 
 
-hdf5_test.x: constants.o hdf5_utils.o main.o 
-	$(FC) $(FFLAGS) $(LDINC) -o $@ $^ $(LDFLAGS) $(LDLIBS)
+hdf5_test.x: constants.o hdf5_utils.o main.o
+	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
 
 main.o: constants.o hdf5_utils.o
 
 %.o : %.f90
-	$(FC) $(FFLAGS) $(LDINC) -c -o $@ $<
+	$(FC) $(FFLAGS) -c -o $@ $<
 
 docs:
 	cd docs; doxygen HDF5_utils.doxy
