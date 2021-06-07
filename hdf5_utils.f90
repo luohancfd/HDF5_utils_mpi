@@ -43,6 +43,8 @@ module HDF5_utils
   public :: hdf_write_vector_to_dataset, hdf_read_vector_from_dataset
   public :: HID_T, hdf_set_print_messages, hdf_set_default_filter
 
+  private :: hdf_preset_prop, hdf_close_prop
+
 
   !>  \brief Generic interface to write a dataset
   !>
@@ -229,6 +231,11 @@ module HDF5_utils
   integer :: hdf_szip_pixels_per_block = 8    ! should be even number less than 32 (https://portal.hdfgroup.org/display/HDF5/H5P_SET_SZIP)
   character(len=2) :: hdf_szip_options = 'NN'  ! H5_SZIP_NN_OM_F or H5_SZIP_EC_OM_F
 
+  !
+  ! compound type for double precision complex number
+  integer(HID_T) :: complexd_type_id, complexd_field_id(2)
+  character(len=1), parameter :: complexd_field_name(2) = (/'r', 'i'/)
+  integer(HID_T) :: xfer_pid
 
 contains
 
@@ -281,7 +288,6 @@ contains
     write(*,*) filter, gzip_level, szip_pixels_per_block, szip_options
 
   end subroutine hdf_set_default_filter
-
 
   !>  \brief Check if location exists.
   !>
@@ -404,6 +410,8 @@ contains
        stop
     end if
 
+    call hdf_preset_prop()
+
     !write(*,'(A20,I0)') "h5fcreate: ", hdferror
 
   end subroutine hdf_open_file
@@ -420,6 +428,8 @@ contains
        write(*,'(A)') "->hdf_close_file"
     end if
 
+    call hdf_close_prop()
+
     call h5fclose_f(file_id, hdferror)
     !write(*,'(A20,I0)') "h5fclose: ", hdferror
 
@@ -427,6 +437,58 @@ contains
 
   end subroutine hdf_close_file
 
+  !>  \brief Preset some properties
+  subroutine hdf_preset_prop()
+    implicit none
+    integer :: ii
+    integer(SIZE_T) ::offset
+    INTEGER(SIZE_T)     ::   type_sizei  ! Size of the integer datatype
+    INTEGER(SIZE_T)     ::   type_sized  ! Size of the double precision datatype
+    INTEGER(SIZE_T)     ::   type_sizer  ! Size of the real datatype
+    integer :: hdferror
+
+    call h5tget_size_f(H5T_NATIVE_INTEGER, type_sizei, hdferror)
+    call h5tget_size_f(H5T_NATIVE_DOUBLE, type_sized, hdferror)
+    call h5tget_size_f(H5T_NATIVE_REAL, type_sizer, hdferror)
+
+
+    ! set dataset transfer property to preserve partially initialized fields
+    ! during write/read to/from dataset with compound datatype.
+    call h5pcreate_f(H5P_DATASET_XFER_F, xfer_pid, hdferror)
+    call h5pset_preserve_f(xfer_pid, .TRUE., hdferror)
+
+    !
+    ! create compound type for double complex
+    !
+    call h5tcreate_f(H5T_COMPOUND_F, type_sized*2, complexd_type_id, hdferror)
+    offset = 0
+    do ii = 1, 2
+      call h5tinsert_f(complexd_type_id, complexd_field_name(ii), offset, &
+        H5T_NATIVE_DOUBLE, hdferror)
+      offset = offset + type_sized
+    end do
+    offset = 0
+    do ii = 1,2
+      call h5tcreate_f(H5T_COMPOUND_F, type_sized, complexd_field_id(ii), hdferror)
+      call h5tinsert_f(complexd_field_id(ii), complexd_field_name(ii), offset, &
+        H5T_NATIVE_DOUBLE, hdferror)
+    end do
+  end subroutine hdf_preset_prop
+
+  !>  \brief Preset some properties
+  subroutine hdf_close_prop()
+    implicit none
+    integer :: ii
+    integer :: hdferror
+
+    call h5pclose_f(xfer_pid, hdferror)
+
+    call h5tclose_f(complexd_type_id, hdferror)
+    do ii = 1, 2
+      call h5tclose_f(complexd_field_id(ii), hdferror)
+    end do
+
+  end subroutine hdf_close_prop
 
   !>  \brief Create a new group
   subroutine hdf_create_group(loc_id, group_name)
@@ -2547,10 +2609,8 @@ contains
     integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
 
-    integer(SIZE_T) :: dims(1), offset
-    integer(HID_T) :: dset_id, dspace_id, plist_transfer_id, dtype_id
-    integer(SIZE_T) :: type_sized                     ! size of double precision number
-    integer(HID_T) :: dt1_id, dt2_id                  ! Memory datatype identifier
+    integer(SIZE_T) :: dims(1)
+    integer(HID_T) :: dset_id, dspace_id
     integer :: hdferror
 
     if (hdf_print_messages) then
@@ -2570,37 +2630,19 @@ contains
       write(*,'(A)') "--->hdf_write_dataset_complex_double_0: warning chunks not used"
     endif
 
-    ! set dataset transfer property to preserve partially initialized fields
-    ! during write/read to/from dataset with compound datatype.
-    CALL h5pcreate_f(H5P_DATASET_XFER_F, plist_transfer_id, hdferror)
-    CALL h5pset_preserve_f(plist_transfer_id, .TRUE., hdferror)
-
     ! create dataspace
     call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
-    ! create compound datatype, insert members
-    ! naming follows numpy's convention
-    offset = 0
-    CALL h5tget_size_f(H5T_NATIVE_DOUBLE, type_sized, hdferror)
-    CALL h5tcreate_f(H5T_COMPOUND_F, type_sized*2, dtype_id, hdferror)
-    CALL h5tinsert_f(dtype_id, "r", offset, H5T_NATIVE_DOUBLE, hdferror)
-    CALL h5tinsert_f(dtype_id, "i", offset + type_sized, H5T_NATIVE_DOUBLE, hdferror)
-
-    ! build memory map
-    offset = 0
-    CALL h5tcreate_f(H5T_COMPOUND_F, type_sized, dt1_id, hdferror)
-    CALL h5tinsert_f(dt1_id, "r", offset, H5T_NATIVE_DOUBLE, hdferror)
-    CALL h5tcreate_f(H5T_COMPOUND_F, type_sized, dt2_id, hdferror)
-    CALL h5tinsert_f(dt2_id, "i", offset, H5T_NATIVE_DOUBLE, hdferror)
-
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, dtype_id, dspace_id, dset_id, hdferror)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
     ! write data by fields in the datatype. Fields order is not important.
-    call h5dwrite_f(dset_id, dt1_id, real(array),  dims, hdferror, xfer_prp = plist_transfer_id)
-    call h5dwrite_f(dset_id, dt2_id, aimag(array), dims, hdferror, xfer_prp = plist_transfer_id)
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
@@ -2608,10 +2650,6 @@ contains
     !write(*,'(A20,I0)') "h5dclose: ", hdferror
     call h5sclose_f(dspace_id, hdferror)
     !write(*,'(A20,I0)') "h5sclose: ", hdferror
-    call h5pclose_f(plist_transfer_id, hdferror)
-    call h5tclose_f(dtype_id, hdferror)
-    call h5tclose_f(dt1_id, hdferror)
-    call h5tclose_f(dt2_id, hdferror)
   end subroutine hdf_write_dataset_complex_double_0
 
 

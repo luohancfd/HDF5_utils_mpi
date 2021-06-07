@@ -8,7 +8,7 @@ program hdf5_test
   integer :: ii, jj, kk, ll
   integer :: data0, data1(0:8), data2(4,6), data3(4,6,8), data4(4,6,8,10)
   CHARACTER(len=10) :: data5, data6(3), data7(3,2)
-  double complex :: data8
+  double complex :: data8, data9
   real(sp) :: data2_sp(4,6)
   real(dp) :: data2_dp(4,6)
 
@@ -54,6 +54,7 @@ program hdf5_test
   end do
 
   data8 = (1.0d0, -2.0d0)
+  data9 = (-1d0, 1.1d0)
 
   write(*,*) sp, dp
   data2_sp = real(data2, sp)
@@ -110,6 +111,7 @@ contains
     call hdf_write_dataset(file_id, "data6", data6)
     call hdf_write_dataset(file_id, "data7", data7)
     call hdf_write_dataset(file_id, "data8", data8)
+    call hdf_write_dataset(file_id, "data9", data9)
 
     call hdf_write_dataset(file_id, "data2_sp", data2_sp)
     call hdf_write_dataset(file_id, "data2_dp", data2_dp)
