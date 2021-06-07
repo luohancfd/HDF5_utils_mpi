@@ -82,6 +82,7 @@ module HDF5_utils
      module procedure hdf_write_dataset_character_0
      module procedure hdf_write_dataset_character_1
      module procedure hdf_write_dataset_character_2
+     module procedure hdf_write_dataset_complex_double_0
   end interface hdf_write_dataset
 
 
@@ -2531,6 +2532,88 @@ contains
     !write(*,'(A20,I0)') "h5tclose: ", hdferror
 
   end subroutine hdf_write_dataset_character_2
+
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_write_dataset_double_complex--------------------------------
+  !!----------------------------------------------------------------------------------------
+
+
+  !  \brief writes a scalar to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_0(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array                  ! data to be written
+    integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer(SIZE_T) :: dims(1), offset
+    integer(HID_T) :: dset_id, dspace_id, plist_transfer_id, dtype_id
+    integer(SIZE_T) :: type_sized                     ! size of double precision number
+    integer(HID_T) :: dt1_id, dt2_id                  ! Memory datatype identifier
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_complex_double_0: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    dims = (/ 0 /)
+
+    !
+    if (present(filter)) then
+      write(*,'(A)') "--->hdf_write_dataset_complex_double_0: warning filter not used"
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      write(*,'(A)') "--->hdf_write_dataset_complex_double_0: warning chunks not used"
+    endif
+
+    ! set dataset transfer property to preserve partially initialized fields
+    ! during write/read to/from dataset with compound datatype.
+    CALL h5pcreate_f(H5P_DATASET_XFER_F, plist_transfer_id, hdferror)
+    CALL h5pset_preserve_f(plist_transfer_id, .TRUE., hdferror)
+
+    ! create dataspace
+    call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create compound datatype, insert members
+    ! naming follows numpy's convention
+    offset = 0
+    CALL h5tget_size_f(H5T_NATIVE_DOUBLE, type_sized, hdferror)
+    CALL h5tcreate_f(H5T_COMPOUND_F, type_sized*2, dtype_id, hdferror)
+    CALL h5tinsert_f(dtype_id, "r", offset, H5T_NATIVE_DOUBLE, hdferror)
+    CALL h5tinsert_f(dtype_id, "i", offset + type_sized, H5T_NATIVE_DOUBLE, hdferror)
+
+    ! build memory map
+    offset = 0
+    CALL h5tcreate_f(H5T_COMPOUND_F, type_sized, dt1_id, hdferror)
+    CALL h5tinsert_f(dt1_id, "r", offset, H5T_NATIVE_DOUBLE, hdferror)
+    CALL h5tcreate_f(H5T_COMPOUND_F, type_sized, dt2_id, hdferror)
+    CALL h5tinsert_f(dt2_id, "i", offset, H5T_NATIVE_DOUBLE, hdferror)
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, dtype_id, dspace_id, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, dt1_id, real(array),  dims, hdferror, xfer_prp = plist_transfer_id)
+    call h5dwrite_f(dset_id, dt2_id, aimag(array), dims, hdferror, xfer_prp = plist_transfer_id)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+    call h5sclose_f(dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5sclose: ", hdferror
+    call h5pclose_f(plist_transfer_id, hdferror)
+    call h5tclose_f(dtype_id, hdferror)
+    call h5tclose_f(dt1_id, hdferror)
+    call h5tclose_f(dt2_id, hdferror)
+  end subroutine hdf_write_dataset_complex_double_0
+
 
   !!---------------------------------------------------------------------------------------
   !!--------------------------------hdf_read_dataset_integer--------------------------------
