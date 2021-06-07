@@ -85,6 +85,12 @@ module HDF5_utils
      module procedure hdf_write_dataset_character_1
      module procedure hdf_write_dataset_character_2
      module procedure hdf_write_dataset_complex_double_0
+     module procedure hdf_write_dataset_complex_double_1
+     module procedure hdf_write_dataset_complex_double_2
+     module procedure hdf_write_dataset_complex_double_3
+     module procedure hdf_write_dataset_complex_double_4
+     module procedure hdf_write_dataset_complex_double_5
+     module procedure hdf_write_dataset_complex_double_6
   end interface hdf_write_dataset
 
 
@@ -692,6 +698,7 @@ contains
     integer :: i
     character(len=32) :: format_string
 
+    vector = 0
     if (hdf_print_messages) then
        write(*,'(A)') "--->hdf_write_vector_to_dataset_integer: " // trim(dset_name)
     end if
@@ -972,6 +979,7 @@ contains
     integer :: i
     character(len=32) :: format_string
 
+    vector = 0.0
     if (hdf_print_messages) then
        write(*,'(A)') "--->hdf_read_vector_from_dataset_real: " // trim(dset_name)
     end if
@@ -1042,6 +1050,7 @@ contains
     integer :: i
     character(len=32) :: format_string
 
+    vector = 0.0
     if (hdf_print_messages) then
        write(*,'(A)') "--->hdf_read_vector_from_dataset_double: " // trim(dset_name)
     end if
@@ -2652,6 +2661,385 @@ contains
     !write(*,'(A20,I0)') "h5sclose: ", hdferror
   end subroutine hdf_write_dataset_complex_double_0
 
+  !  \brief writes a 1d array to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_1(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array(:)               ! data to be written
+    integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer :: rank
+    integer(SIZE_T) :: dims(1), cdims(1)
+    integer(HID_T) :: dset_id, dspace_id, plist_id
+    character(len=32) :: filter_case
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_double_1: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 1
+    dims = shape(array, KIND=HID_T)
+
+    !
+    if (present(filter)) then
+      filter_case = filter
+    else
+      filter_case = hdf_default_filter
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      cdims = int(chunks, SIZE_T)
+    else
+      cdims = 0
+    endif
+
+    ! create and set property list
+    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
+    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+
+    ! create dataspace
+    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5pclose_f(plist_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_write_dataset_complex_double_1
+
+  !  \brief writes a 2d array to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_2(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array(:,:)                ! data to be written
+    integer, optional, intent(in) :: chunks(2)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer :: rank
+    integer(SIZE_T) :: dims(2), cdims(2)
+    integer(HID_T) :: dset_id, dspace_id, plist_id
+    character(len=32) :: filter_case
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_complex_double_2: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 2
+    dims = shape(array, KIND=HID_T)
+
+    !
+    if (present(filter)) then
+      filter_case = filter
+    else
+      filter_case = hdf_default_filter
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      cdims = int(chunks, SIZE_T)
+    else
+      cdims = 0
+    endif
+
+    ! create and set property list
+    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
+    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+
+    ! create dataspace
+    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5pclose_f(plist_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_write_dataset_complex_double_2
+
+  !  \brief writes a 3d array to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_3(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array(:,:,:)              ! data to be written
+    integer, optional, intent(in) :: chunks(3)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer :: rank
+    integer(SIZE_T) :: dims(3), cdims(3)
+    integer(HID_T) :: dset_id, dspace_id, plist_id
+    character(len=32) :: filter_case
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_complex_double_3: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 3
+    dims = shape(array, KIND=HID_T)
+
+    !
+    if (present(filter)) then
+      filter_case = filter
+    else
+      filter_case = hdf_default_filter
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      cdims = int(chunks, SIZE_T)
+    else
+      cdims = 0
+    endif
+
+    ! create and set property list
+    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
+    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+
+    ! create dataspace
+    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5pclose_f(plist_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_write_dataset_complex_double_3
+
+  !  \brief writes a 4d array to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_4(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array(:,:,:,:)            ! data to be written
+    integer, optional, intent(in) :: chunks(4)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer :: rank
+    integer(SIZE_T) :: dims(4), cdims(4)
+    integer(HID_T) :: dset_id, dspace_id, plist_id
+    character(len=32) :: filter_case
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_complex_double_4: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 4
+    dims = shape(array, KIND=HID_T)
+
+    !
+    if (present(filter)) then
+      filter_case = filter
+    else
+      filter_case = hdf_default_filter
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      cdims = int(chunks, SIZE_T)
+    else
+      cdims = 0
+    endif
+
+    ! create and set property list
+    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
+    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+
+    ! create dataspace
+    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5pclose_f(plist_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_write_dataset_complex_double_4
+
+  !  \brief writes a 5d array to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_5(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array(:,:,:,:,:)          ! data to be written
+    integer, optional, intent(in) :: chunks(5)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer :: rank
+    integer(SIZE_T) :: dims(5), cdims(5)
+    integer(HID_T) :: dset_id, dspace_id, plist_id
+    character(len=32) :: filter_case
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_complex_double_5: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 5
+    dims = shape(array, KIND=HID_T)
+
+    !
+    if (present(filter)) then
+      filter_case = filter
+    else
+      filter_case = hdf_default_filter
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      cdims = int(chunks, SIZE_T)
+    else
+      cdims = 0
+    endif
+
+    ! create and set property list
+    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
+    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+
+    ! create dataspace
+    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    write(*,*) hdferror
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    write(*,*) hdferror
+    ! close all id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5pclose_f(plist_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_write_dataset_complex_double_5
+
+  !  \brief writes a 6d array to an hdf5 file
+  subroutine hdf_write_dataset_complex_double_6(loc_id, dset_name, array, chunks, filter)
+
+    integer(HID_T), intent(in) :: loc_id              ! local id in file
+    character(len=*), intent(in) :: dset_name         ! name of dataset
+    complex(dp), intent(in) :: array(:,:,:,:,:,:)        ! data to be written
+    integer, optional, intent(in) :: chunks(6)        ! chunk size for dataset
+    character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+
+    integer :: rank
+    integer(SIZE_T) :: dims(6), cdims(6)
+    integer(HID_T) :: dset_id, dspace_id, plist_id
+    character(len=32) :: filter_case
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_write_dataset_complex_double_6: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 6
+    dims = shape(array, KIND=HID_T)
+
+    !
+    if (present(filter)) then
+      filter_case = filter
+    else
+      filter_case = hdf_default_filter
+    endif
+
+    ! set chunk (if needed)
+    if (present(chunks)) then
+      cdims = int(chunks, SIZE_T)
+    else
+      cdims = 0
+    endif
+
+    ! create and set property list
+    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
+    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+
+    ! create dataspace
+    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write data by fields in the datatype. Fields order is not important.
+    call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+      dims, hdferror, xfer_prp = xfer_pid)
+    call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+      dims, hdferror, xfer_prp = xfer_pid)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5pclose_f(plist_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_write_dataset_complex_double_6
 
   !!---------------------------------------------------------------------------------------
   !!--------------------------------hdf_read_dataset_integer--------------------------------

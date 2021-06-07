@@ -5,10 +5,10 @@ program hdf5_test
   use hdf5_utils, only: hdf_set_print_messages
   implicit none
 
-  integer :: ii, jj, kk, ll
+  integer :: ii, jj, kk, ll, mm, nn ,nnn
   integer :: data0, data1(0:8), data2(4,6), data3(4,6,8), data4(4,6,8,10)
   CHARACTER(len=10) :: data5, data6(3), data7(3,2)
-  double complex :: data8, data9
+  complex(8) :: data8, data9(5), data10(2,2,2,2,2), data11(2,2)
   real(sp) :: data2_sp(4,6)
   real(dp) :: data2_dp(4,6)
 
@@ -54,7 +54,26 @@ program hdf5_test
   end do
 
   data8 = (1.0d0, -2.0d0)
-  data9 = (-1d0, 1.1d0)
+  do ii = 1,5
+    data9(ii) = cmplx(dble(ii), dble(ii+1), kind=8)
+  end do
+
+  nn = 0
+  nnn = 0
+  do ii = 1, 2
+    do jj = 1, 2
+      nnn = nnn + 1
+       data11(jj, ii) = cmplx(dble(nnn), dble(-nnn), kind=8)
+      do kk = 1, 2
+        do ll = 1, 2
+          do mm = 1,2
+            nn = nn + 1
+            data10(mm, ll, kk, jj ,ii) = cmplx(dble(nn), dble(-nn), kind=8)
+          end do
+        end do
+      end do
+    end do
+  end do
 
   write(*,*) sp, dp
   data2_sp = real(data2, sp)
@@ -112,6 +131,8 @@ contains
     call hdf_write_dataset(file_id, "data7", data7)
     call hdf_write_dataset(file_id, "data8", data8)
     call hdf_write_dataset(file_id, "data9", data9)
+    call hdf_write_dataset(file_id, "data10", data10)
+    call hdf_write_dataset(file_id, "data11", data11)
 
     call hdf_write_dataset(file_id, "data2_sp", data2_sp)
     call hdf_write_dataset(file_id, "data2_dp", data2_dp)
