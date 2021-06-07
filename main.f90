@@ -4,19 +4,22 @@ program hdf5_test
   use kinds
   use hdf5_utils, only: hdf_set_print_messages
   implicit none
-  
+
   integer :: ii, jj, kk, ll
-  integer :: data0, data1(8), data2(4,6), data3(4,6,8), data4(4,6,8,10)
+  integer :: data0, data1(0:8), data2(4,6), data3(4,6,8), data4(4,6,8,10)
+  CHARACTER(len=10) :: data5, data6(3), data7(3,2)
   real(sp) :: data2_sp(4,6)
   real(dp) :: data2_dp(4,6)
 
+  integer, allocatable :: data_buf(:)
+
   ! fill in data
   data0 = 42
-  
-  do ii = 1, 8
+
+  do ii = 0, 8
     data1(ii) = 10 + ii
   end do
-  
+
   do ii = 1, 4
     do jj = 1, 6
       data2(ii,jj) = (ii-1)*6 + jj
@@ -39,6 +42,15 @@ program hdf5_test
         end do
       end do
     end do
+  end do
+
+  data5 = "abc"
+  do ii = 1,3
+    write(data6(ii), "(A,'_',I1)") "abc", ii
+    do jj = 1,2
+        write(data7(ii,jj), "(A,'_',I1, '_', I1)") "abc", ii, jj
+    end do
+
   end do
 
   write(*,*) sp, dp
@@ -92,6 +104,9 @@ contains
     call hdf_write_dataset(file_id, "data2", data2)
     call hdf_write_dataset(file_id, "data3", data3)
     call hdf_write_dataset(file_id, "data4", data4)
+    call hdf_write_dataset(file_id, "data5", data5)
+    call hdf_write_dataset(file_id, "data6", data6)
+    call hdf_write_dataset(file_id, "data7", data7)
 
     call hdf_write_dataset(file_id, "data2_sp", data2_sp)
     call hdf_write_dataset(file_id, "data2_dp", data2_dp)
@@ -101,15 +116,17 @@ contains
 
   end subroutine test_hl_write_dataset
 
-  
-  !    
+
+  !
   ! test reading
   !
   subroutine test_hl_read_dataset()
 
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id
+    integer :: i,j
+    character(len=20) :: str_buf, str_buf2(3),str_buf3(3,2)
 
     write(*,'(A)') ""
     write(*,'(A)') "Test reading dataset"
@@ -117,29 +134,43 @@ contains
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
 
-    ! read in some datasets 
+    ! read in some datasets
     call hdf_read_dataset(file_id, "data0", data0)
     call hdf_read_dataset(file_id, "data1", data1)
+    write(*,*) "data1:"
+    do i=0,8
+      write(*,'(I3, ",")', advance='no') data1(i)
+    enddo
+    write(*,*)
     call hdf_read_dataset(file_id, "data2", data2)
     call hdf_read_dataset(file_id, "data3", data3)
     call hdf_read_dataset(file_id, "data4", data4)
+    call hdf_read_dataset(file_id, "data5", str_buf)
+    write(*,'(5A)') "The string is : |", str_buf, "|"
+    call hdf_read_dataset(file_id, "data6", str_buf2)
+    call hdf_read_dataset(file_id, "data7", str_buf3)
+    do i=1,3
+      do j = 1,2
+        write(*, '(I1,",",I1,":", A)') i, j, str_buf3(i,j)
+      end do
+    end do
 
     call hdf_read_dataset(file_id, "data2_sp", data2_sp)
     call hdf_read_dataset(file_id, "data2_dp", data2_dp)
-    
+
     ! close file
     call hdf_close_file(file_id)
 
   end subroutine test_hl_read_dataset
 
 
-  !    
+  !
   ! test reading and converting between types
   !
   subroutine test_hl_read_convert()
 
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id
     integer :: ii
 
@@ -149,7 +180,7 @@ contains
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
 
-    ! read in some datasets 
+    ! read in some datasets
     call hdf_read_dataset(file_id, "data2_dp", data2)
     call hdf_read_dataset(file_id, "data2_dp", data2_sp)
     call hdf_read_dataset(file_id, "data2_dp", data2_dp)
@@ -200,12 +231,12 @@ contains
 
   end subroutine test_hl_write_dataset_special
 
-  
+
   !
   ! use attribute
   !
   subroutine test_hl_attributes()
-    
+
     use hdf5_utils
 
     integer(HID_T) :: file_id
@@ -215,14 +246,14 @@ contains
 
     write(*,'(A)') ""
     write(*,'(A)') "Test writing attributes"
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READWRITE')
 
     ! write attribute to a dataset
     call hdf_write_attribute(file_id, "data1", "rank", 7)
     call hdf_write_attribute(file_id, "data4", "luckynumber", 1.618_dp)
-    
+
     ! write attribute to the file (and get version from Makefile)
     call date_and_time(DATE=date, TIME=time)
     call hdf_write_attribute(file_id, "", "date/time", date // ": " // time)
@@ -232,10 +263,10 @@ contains
 
     ! close file
     call hdf_close_file(file_id)
-    
+
   end subroutine test_hl_attributes
 
-      
+
 
   !>  \brief Test using groups
   subroutine test_hl_groups()
@@ -246,7 +277,7 @@ contains
 
     write(*,'(A)') ""
     write(*,'(A)') "Test using groups"
-    
+
     ! open file
     call hdf_open_file(file_id, "test_groups.h5", STATUS='NEW')
 
@@ -272,7 +303,7 @@ contains
 
   !>  \brief Test using hdf_get_rank and hdf_get_dims to allocate an array for hdf_read_dataset
   subroutine test_hl_unkownsize()
-    
+
     use hdf5_utils
 
     integer(HID_T) :: file_id
@@ -282,7 +313,7 @@ contains
 
     write(*,'(A)') ""
     write(*,'(A)') "Test using groups"
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
 
@@ -290,7 +321,7 @@ contains
     call hdf_get_rank(file_id, "data4", rank)
     write(*,*) "rank(data4) = ", rank
 
-    ! get dimensions 
+    ! get dimensions
     call hdf_get_dims(file_id, "data4", dims)
     write(*,*) "dims(data4) = ", dims(1:rank)
 
@@ -303,7 +334,7 @@ contains
 
   end subroutine test_hl_unkownsize
 
-  
+
   !>  \brief write out by column
   subroutine test_hl_bycolumn()
 
@@ -313,10 +344,10 @@ contains
 
     integer :: j, k
     real(dp) :: array(4)
-    
+
     write(*,'(A)') ""
     write(*,'(A)') "Test writing out by column"
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='WRITE')
 
@@ -333,13 +364,13 @@ contains
 
     call hdf_read_vector_from_dataset(file_id, "data3", (/1,1/), array)
     write(*,*) array
-    
+
     ! close file
     call hdf_close_file(file_id)
 
   end subroutine test_hl_bycolumn
-  
-  
+
+
   !>  \brief write out some H5T types for reference
   subroutine hdf5_types()
     use hdf5
@@ -354,8 +385,8 @@ contains
 
     write(*,*) H5T_NATIVE_REAL
     write(*,*) H5T_IEEE_F32BE
-    write(*,*) H5T_IEEE_F32LE 
-    
+    write(*,*) H5T_IEEE_F32LE
+
     call h5close_f(hdferror)
 
   end subroutine hdf5_types
@@ -374,7 +405,7 @@ contains
     integer :: hdferror
 
     write(*,'(A)') "test_low_level"
-    
+
     ! open hdf5 interface
     call h5open_f(hdferror)
     write(*,'(A20,I0)') "h5open: ", hdferror
