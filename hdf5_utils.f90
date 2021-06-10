@@ -154,6 +154,13 @@ module HDF5_utils
      module procedure hdf_read_dataset_character_0
      module procedure hdf_read_dataset_character_1
      module procedure hdf_read_dataset_character_2
+     module procedure hdf_read_dataset_complex_double_0
+     module procedure hdf_read_dataset_complex_double_1
+     module procedure hdf_read_dataset_complex_double_2
+     module procedure hdf_read_dataset_complex_double_3
+     module procedure hdf_read_dataset_complex_double_4
+     module procedure hdf_read_dataset_complex_double_5
+     module procedure hdf_read_dataset_complex_double_6
   end interface hdf_read_dataset
 
   !>  \brief Generic interface to read a vector from a dataset
@@ -298,22 +305,18 @@ contains
   !>  \brief Check if location exists.
   !>
   !>  Also checks is intemediate paths exists in a safe way.
-  function hdf_exists(loc_id, obj_name) result(exists)
+  subroutine hdf_exists(loc_id, obj_name, exists)
 
     integer(HID_T), intent(in) :: loc_id       !< local id
     character(len=*), intent(in) :: obj_name   !< relative path to object
-
-    logical :: exists  !< .TRUE. if everything exists, .FALSE. otherwise
+    logical, intent(out) :: exists  !< .TRUE. if everything exists, .FALSE. otherwise
 
     integer :: hdferror, pos, cpos, str_len
-
-    if (hdf_print_messages) then
-       write(*,'(A,A)') "->hdf_exists: " // obj_name
-    end if
 
     ! check intermediate paths (subgroups)
     str_len = len_trim(obj_name)
     cpos = 0
+    exists = .false.
     do
        !start = cpos + 1
        !write(*,*) start, str_len, obj_name(start:str_len)
@@ -326,12 +329,12 @@ contains
        ! check subgroup
        cpos = cpos + pos
        call h5lexists_f(loc_id, obj_name(1:cpos-1), exists, hdferror)
-       !write(*,*) obj_name(1:cpos-1), exists
+       ! write(*,*) obj_name(1:cpos-1), exists
 
        ! return if intermediate path fails
        if (exists .eqv. .false.) then
           if (hdf_print_messages) then
-             write(*,'(A,A,A)') "--->hdf_exists: subpath '", obj_name(1:cpos-1), "' does not exist, return false"
+             write(*,'(A,A,A)') "--->hdf_exists: subpath '", trim(obj_name(1:cpos-1)), "' does not exist, return false"
           end if
           exists = .false.
           return
@@ -342,10 +345,10 @@ contains
     ! check object (unless obj_name ended with "/"
     if (cpos /= str_len) then
        call h5lexists_f(loc_id, obj_name, exists, hdferror)
-       !write(*,*) obj_name, exists
+       ! write(*,*) obj_name, exists
        if (exists .eqv. .false.) then
           if (hdf_print_messages) then
-             write(*,'(A,A,A)') "--->hdf_exists: object '", obj_name, "' does not exist, return false"
+             write(*,'(A,A,A)') "--->hdf_exists: object '", trim(obj_name), "' does not exist, return false"
           end if
           exists = .false.
           return
@@ -355,7 +358,7 @@ contains
     exists = .true.
     return
 
-  end function hdf_exists
+  end subroutine hdf_exists
 
 
   !>  \brief Opens file and return identifier
@@ -524,6 +527,7 @@ contains
     integer(HID_T), intent(in) :: loc_id         !< location id where to put the group
     character(len=*), intent(in) :: group_name   !< name of the group
     integer(HID_T), intent(out) :: group_id      !< id for the group
+    logical :: exist
 
     integer :: hdferror
 
@@ -531,7 +535,8 @@ contains
        write(*,'(A,A,A)') "->hdf_open_group: '" // trim(group_name) // "'"
     end if
 
-    if (hdf_exists(loc_id, group_name)) then
+    call hdf_exists(loc_id, group_name, exist)
+    if (exist) then
        if (hdf_print_messages) then
           write(*,'(A,A,A)') "->hdf_open_group: opening group '" // trim(group_name) // "'"
        end if
@@ -3975,6 +3980,282 @@ contains
     !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_character_2
+
+
+  !!---------------------------------------------------------------------------------------
+  !!--------------------------------hdf_read_dataset_double_complex------------------------
+  !!---------------------------------------------------------------------------------------
+
+
+  !  \brief reads a scalar from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_0(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array           ! data to be read
+    real(dp) :: buffer(2)                       ! buffer to save real and imag part
+
+
+    integer(SIZE_T) :: dims(1)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_0: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    dims = (/ 0 /)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(2), dims, hdferror)
+    array = cmplx(buffer(1), buffer(2), kind=dp)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_0
+
+  !  \brief reads a 1d array from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_1(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:)        ! data to be written
+    real(dp), allocatable, dimension(:,:) :: buffer ! buffer to save real and imag part
+
+    integer :: rank
+    integer(SIZE_T) :: dims(1)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_1: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 1
+    dims = shape(array, KIND=HID_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    allocate(buffer(dims(1),2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,2), dims, hdferror)
+    array = cmplx(buffer(:,1), buffer(:,2), kind=dp)
+    deallocate(buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_1
+
+  !  \brief reads a 2d array from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_2(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:)        ! data to be written
+    real(dp), allocatable, dimension(:,:,:) :: buffer ! buffer to save real and imag part
+
+    integer :: rank
+    integer(SIZE_T) :: dims(2)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_2: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 2
+    dims = shape(array, KIND=HID_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    allocate(buffer(dims(1),dims(2), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,2), dims, hdferror)
+    array = cmplx(buffer(:,:,1), buffer(:,:,2), kind=dp)
+    deallocate(buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_2
+
+  !  \brief reads a 3d array from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_3(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:)        ! data to be written
+    real(dp), allocatable, dimension(:,:,:,:) :: buffer ! buffer to save real and imag part
+
+    integer :: rank
+    integer(SIZE_T) :: dims(3)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_3: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 3
+    dims = shape(array, KIND=HID_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    allocate(buffer(dims(1),dims(2),dims(3), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,2), dims, hdferror)
+    array = cmplx(buffer(:,:,:,1), buffer(:,:,:,2), kind=dp)
+    deallocate(buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_3
+
+  !  \brief reads a 4d array from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_4(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:,:)        ! data to be written
+    real(dp), allocatable, dimension(:,:,:,:,:) :: buffer ! buffer to save real and imag part
+
+    integer :: rank
+    integer(SIZE_T) :: dims(4)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_4: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 4
+    dims = shape(array, KIND=HID_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    allocate(buffer(dims(1),dims(2),dims(3),dims(4), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,2), dims, hdferror)
+    array = cmplx(buffer(:,:,:,:,1), buffer(:,:,:,:,2), kind=dp)
+    deallocate(buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_4
+
+    !  \brief reads a 5d array from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_5(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:,:,:)        ! data to be written
+    real(dp), allocatable, dimension(:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
+
+    integer :: rank
+    integer(SIZE_T) :: dims(5)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_5: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 5
+    dims = shape(array, KIND=HID_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    allocate(buffer(dims(1),dims(2),dims(3),dims(4),dims(5), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,2), dims, hdferror)
+    array = cmplx(buffer(:,:,:,:,:,1), buffer(:,:,:,:,:,2), kind=dp)
+    deallocate(buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_5
+
+  !  \brief reads a 2d array from an hdf5 file
+  subroutine hdf_read_dataset_complex_double_6(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:,:,:,:)        ! data to be written
+    real(dp), allocatable, dimension(:,:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
+
+    integer :: rank
+    integer(SIZE_T) :: dims(6)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+       write(*,'(A)') "--->hdf_read_dataset_complex_double_6: " // trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 2
+    dims = shape(array, KIND=HID_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! read dataset
+    allocate(buffer(dims(1),dims(2),dims(3),dims(4),dims(5),dims(6),2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,:,1), dims, hdferror)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,:,2), dims, hdferror)
+    array = cmplx(buffer(:,:,:,:,:,:,1), buffer(:,:,:,:,:,:,2), kind=dp)
+    deallocate(buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+  end subroutine hdf_read_dataset_complex_double_6
 
 
   !!---------------------------------------------------------------------------------------

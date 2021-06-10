@@ -152,7 +152,8 @@ contains
 
     integer(HID_T) :: file_id
     integer :: i,j
-    character(len=20) :: str_buf, str_buf2(3),str_buf3(3,2)
+    character(len=20) :: str_buf, str_buf2(3),str_buf3(3,2), dname
+    logical :: exist
 
     write(*,'(A)') ""
     write(*,'(A)') "Test reading dataset"
@@ -180,6 +181,22 @@ contains
         write(*, '(I1,",",I1,":", A)') i, j, str_buf3(i,j)
       end do
     end do
+    call hdf_read_dataset(file_id, "data8", data8)
+    call hdf_read_dataset(file_id, "data9", data9)
+    data10 = cmplx(0.0, 0.0, 8)
+    data11 = cmplx(0.0, 0.0, 8)
+    call hdf_read_dataset(file_id, "data10", data10)
+    call hdf_read_dataset(file_id, "data11", data11)
+
+    write(*,*) "Does /data10 exist?"
+    dname  = "data10"
+    call hdf_exists(file_id, dname, exist)
+    write(*,*) exist
+
+    write(*,*) "Does /data12 exist?"
+    dname = "data12"
+    call hdf_exists(file_id, dname, exist)
+    write(*,*) exist
 
     call hdf_read_dataset(file_id, "data2_sp", data2_sp)
     call hdf_read_dataset(file_id, "data2_dp", data2_dp)
