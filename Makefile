@@ -1,6 +1,6 @@
 
 
-FC = gfortran
+FC = mpif90.openmpi
 
 # GIT tag usage
 # >>> git tag -a v1.4 -m "my version 1.4"
@@ -39,10 +39,10 @@ $(info $(FFLAGS))
 .PHONY: clean docs
 
 
-hdf5_test.x: constants.o hdf5_utils.o main.o
+hdf5_test.x: parallel.o hdf5_utils_mpi.o
 	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
 
-main.o: constants.o hdf5_utils.o
+parallel.o: hdf5_utils_mpi.o
 
 %.o : %.f90
 	$(FC) $(FFLAGS) -c -o $@ $<

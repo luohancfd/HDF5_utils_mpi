@@ -31,3 +31,6 @@
 
 *.h5
 docs/html/
+
+*.pyc
+_pycache_/
