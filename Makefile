@@ -32,9 +32,6 @@ endif
 
 FFLAGS += -g
 
-$(info $(FFLAGS))
-
-
 
 .PHONY: clean docs
 
@@ -46,6 +43,11 @@ parallel.o: hdf5_utils_mpi.o
 
 %.o : %.f90
 	$(FC) $(FFLAGS) -c -o $@ $<
+
+hdf5_utils_mpi.f90 : FORCE
+	cd core && python gen_code.py
+
+FORCE:
 
 docs:
 	cd docs; doxygen HDF5_utils.doxy

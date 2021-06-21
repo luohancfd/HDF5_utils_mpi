@@ -1212,6 +1212,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_integer_0: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1228,6 +1229,12 @@
     dims = (/0/)
     call h5screate_f(H5S_SCALAR_F, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
 
     ! create attribute
     call h5acreate_f(obj_id, attr_name, H5T_NATIVE_INTEGER, aspace_id, attr_id, hdferror)
@@ -1260,6 +1267,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_integer_1: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1270,6 +1278,12 @@
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -1309,6 +1323,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_real_0: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1319,6 +1334,12 @@
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -1357,6 +1378,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_real_1: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1367,6 +1389,12 @@
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -1406,6 +1434,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_double_0: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1416,6 +1445,12 @@
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -1454,6 +1489,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_double_1: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1464,6 +1500,12 @@
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -1502,6 +1544,7 @@
     integer(SIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, type_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_string: "//trim(obj_name)//"/"//trim(attr_name)
@@ -1512,6 +1555,12 @@
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create type_id and aspace_id

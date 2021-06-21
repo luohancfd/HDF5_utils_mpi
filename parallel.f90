@@ -67,6 +67,8 @@
      call hdf_write_dataset(file_id, "data1", data1)
 
      call hdf_write_dataset(file_id, "data2", mpi_rank, processor=2)
+
+     ! call hdf_write_attribute(file_id, "", "test", 1)
      call hdf_close_file(file_id)
 
      ! read test

@@ -441,6 +441,10 @@ contains
 
     call hdf_preset_prop()
 
+    if ((status2 .ne. 'OLD') .or. (action2 == 'WRITE') .or. (action2 == 'READWRITE')) then
+      call hdf_preset_file_attribute(file_id)
+    end if
+
     !write(*,'(A20,I0)') "h5fcreate: ", hdferror
 
   end subroutine hdf_open_file
@@ -465,6 +469,14 @@ contains
     call h5close_f(hdferror)
 
   end subroutine hdf_close_file
+
+  !>  \brief Preset some file-level attributes
+  subroutine hdf_preset_file_attribute(file_id)
+    implicit none
+    integer(HID_T), intent(in) :: file_id            !< HDF5 id of the file
+
+    call hdf_write_attribute(file_id, "", 'mpi_nrank', mpi_nrank)
+  end subroutine hdf_preset_file_attribute
 
   !>  \brief Preset some properties
   subroutine hdf_preset_prop()

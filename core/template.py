@@ -48,6 +48,9 @@ write_single_value_template = '''  subroutine hdf_write_dataset_{ftype_name}_0(l
 {write_string}
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write processor id to the dataset attribute
+    call hdf_write_attribute(dset_id, '', 'mpi_irank', processor_write)
+
     ! close all id's
     call h5sclose_f(dspace_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
@@ -114,6 +117,9 @@ write_array_template = '''  subroutine hdf_write_dataset_{ftype_name}_{rank}(loc
     ! write dataset
 {write_string}
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! write processor id to the dataset attribute
+    call hdf_write_attribute(dset_id, '', 'mpi_irank', processor_write)
 
     ! close all id's
     call h5sclose_f(dspace_id, hdferror)
@@ -198,6 +204,9 @@ write_char0_template = '''  subroutine hdf_write_dataset_character_0(loc_id, dse
 {write_string}
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write processor id to the dataset attribute
+    call hdf_write_attribute(loc_id, '', 'mpi_irank', processor_write)
+
     ! close all id's
     call h5sclose_f(dspace_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
@@ -268,6 +277,9 @@ write_char_array_template = '''  subroutine hdf_write_dataset_{ftype_name}_{rank
     ! write dataset
 {write_string}
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! write processor id to the dataset attribute
+    call hdf_write_attribute(loc_id, '', 'mpi_irank', processor_write)
 
     ! close all id's
     call h5sclose_f(dspace_id, hdferror)
