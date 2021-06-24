@@ -20,7 +20,13 @@
      INTEGER(HSIZE_T), DIMENSION(2) :: dimsfi
 
      INTEGER, ALLOCATABLE :: data0(:,:)   ! Data to write
-     INTEGER, ALLOCATABLE :: data1(:)   ! Data to write
+     real(kind=8), ALLOCATABLE :: data1(:)   ! Data to write
+     integer, allocatable :: data2(:)
+     complex(kind=8), allocatable :: data3(:,:)
+
+     CHARACTER(len=20) :: data4
+     character(len=:), dimension(:, :), allocatable :: data5
+
 
      INTEGER :: rank = 2 ! Dataset rank
 
@@ -37,54 +43,103 @@
      CALL MPI_INIT(mpierror)
      CALL MPI_COMM_SIZE(comm, mpi_size, mpierror)
      CALL MPI_COMM_RANK(comm, mpi_rank, mpierror)
+
+
      !
      ! Initialize data buffer with trivial data.
      !
 
      write(*,* ) "Rank = ", mpi_rank
+
+     ! data0
      ALLOCATE ( data0(dimsf(1),dimsf(2)))
-     allocate(data1(mpi_size*5))
      do i = 1, dimsf(2)
-     do j = 1, dimsf(1)
-        data0(j,i) = j - 1 + (i-1)*dimsf(1)
-     enddo
+          do j = 1, dimsf(1)
+          data0(j,i) = j - 1 + (i-1)*dimsf(1)
+          enddo
      enddo
      if (mpi_rank == 0) then
           data0(1,1) = -2
      end if
-     if (mpi_rank == 1) then
-          data0(1,1) = -1
-     end if
 
+     ! data1
+     allocate(data1(mpi_size*5))
      do i = 1, mpi_size*5
-          data1(i) = i
+        data1(i) = dble(i)
      end do
+
+     ! data2
+     allocate(data2((mpi_rank+2)*2))
+     do i = 1, (mpi_rank+2)*2
+       data2(i) = mpi_rank + i
+     end do
+
+     ! data3
+     allocate(data3(0:10, (mpi_rank+2)*2))
+     do i = 1, (mpi_rank+2)*2
+          do j = 0,10
+               data3(j,i) = cmplx(dble(mpi_rank), dble(i), kind=8)
+          end do
+     end do
+
+     ! data4
+     write(data4, '("Rank=", I2)') mpi_rank
+
+     ! data5: extremely complex array
+     i = 20+mpi_rank
+     ! i = 20
+     allocate (character(len=i)::data5(0:10, (mpi_rank+2)*2))
+     do i = 1, (mpi_rank+2)*2
+          do j = 0,10
+               write(data5(j, i), '("Rank=", I2,"_", I2)') mpi_rank, i
+          end do
+     end do
+
+
      !
      ! Initialize FORTRAN interface
 
      call hdf_open_file(file_id, "test_hl.h5", STATUS='NEW')
-     call hdf_write_dataset(file_id, "data0", data0, processor=1)
+     call hdf_write_dataset(file_id, "data0", data0, processor=0)
      call hdf_write_dataset(file_id, "data1", data1)
+     call hdf_write_dataset(file_id, "data2", data2, axis=1)
 
-     call hdf_write_dataset(file_id, "data2", mpi_rank, processor=2)
+     ! The following call will fail because data3 doesn't have the same dimension along
+     ! axises other than axis=1
+     ! call hdf_write_dataset(file_id, "data3", data3, axis=1)
+
+     ! The following call stacks data3 along axis=2 and write the result
+     call hdf_write_dataset(file_id, "data3", data3, axis=2)
+
+     ! The following call writes data3 on processor = 0 to the file
+     call hdf_write_dataset(file_id, "data3_2", data3, processor=0)
+
+     ! ! This is not a bad call since data4 has different values across processors
+     ! ! there is no guarantee what will be saved
+     call hdf_write_dataset(file_id, "data4", data4)
+     call hdf_write_dataset(file_id, "data4_0", data4, processor=0)
+     call hdf_write_dataset(file_id, "data4_1", data4, axis=1)
+
+     call hdf_write_dataset(file_id, "data5", data5, axis=2)
+
 
      ! call hdf_write_attribute(file_id, "", "test", 1)
      call hdf_close_file(file_id)
 
      ! read test
-     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
-     call hdf_read_dataset(file_id, "data0", data0)
-     call hdf_read_dataset(file_id, "data1", data1)
-     if (mpi_rank == 2) then
-          write(*,*) 'data0:'
-          write(*,*) data0
-          write(*,*) 'data1:'
-          write(*,*) data1
-     end if
-     call hdf_close_file(file_id)
+     ! call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
+     ! call hdf_read_dataset(file_id, "data0", data0)
+     ! call hdf_read_dataset(file_id, "data1", data1)
+     ! if (mpi_rank == 2) then
+     !      write(*,*) 'data0:'
+     !      write(*,*) data0
+     !      write(*,*) 'data1:'
+     !      write(*,*) data1
+     ! end if
+     ! call hdf_close_file(file_id)
 
 
-     DEALLOCATE(data0, data1)
+     DEALLOCATE(data0, data1, data2, data3, data5)
 
 
      CALL MPI_FINALIZE(mpierror)

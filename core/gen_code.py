@@ -41,8 +41,15 @@ def gen_write_dataset(ftype_name, rank):
 
   if ftype_name == 'complex_double':
     write_part = write_complex_dataset_template.format(h5type=h5type)
+  elif ftype_name == 'character':
+    write_part_1 = write_regular_dataset_template.format(h5type=h5type, data_name='array')
+    write_part_2 = write_regular_dataset_template.format(h5type=h5type, data_name='buffer')
+
+    write_part = ['    if (length .eq. length_glob) then'] + ['  '+i for i in write_part_1.split('\n')]
+    write_part += ['    else'] + ['  '+i for i in write_part_2.split('\n')] + ['    end if\n']
+    write_part = '\n'.join(write_part)
   else:
-    write_part = write_regular_dataset_template.format(h5type=h5type)
+    write_part = write_regular_dataset_template.format(h5type=h5type, data_name='array')
 
   config = {
     'ftype': ftype,
@@ -50,30 +57,100 @@ def gen_write_dataset(ftype_name, rank):
     'h5type': h5type,
     'rank': rank,
     'write_string': write_part,
-    'array_comma': array_comma
+    'array_comma': array_comma,
+    'additonal_delcaration': '',
+    'dtype_creation': '',
+    'additional_close': '',
+    'additional_attribute': '',
+    'data_name': 'array'
   }
 
+  nspace = 4
   if rank == 0:
     declaration = f'''{ftype}, intent(in) :: array'''
-    declaration = ' '*4 + declaration
+    declaration = ' '*nspace + declaration
     declaration = '{:54s}! data to be written'.format(declaration)
     config['declaration'] = declaration
-
-    if ftype_name == 'character':
-      return write_char0_template.format(**config)
-    else:
-      return write_single_value_template.format(**config)
   else:
     declaration = f'    {ftype}, intent(in) :: array({array_comma})'
     declaration = '{:54s}! data to be written'.format(declaration)
     config['declaration'] = declaration
 
-    if ftype_name == 'character':
-      length_calculation = '    length=len(array({:s}))'.format('1,'*(rank-1)+'1')
-      config['length_calculation'] = length_calculation
-      return write_char_array_template.format(**config)
+  dim_string = ','.join([f'dimsm({i})' for i in range(1, rank+1)])
+
+  if ftype_name == 'character':
+    config['additonal_delcaration'] = [
+      'integer(HSIZE_T) :: length, length_glob',
+      'integer(HID_T) :: dtype_id'
+    ]
+
+    if rank > 0:
+      config['additonal_delcaration'].append('integer :: ' + ', '.join([f'i_{i}' for i in range(1, rank+1)]))
+
+    if rank == 0:
+      config['additonal_delcaration'].append(f'character(len=:),allocatable :: buffer')
+      buffer_allocation = 'allocate(character(len=length_glob)::buffer)'
     else:
-      return write_array_template.format(**config)
+      config['additonal_delcaration'].append(f'character(len=:), dimension({array_comma}), allocatable :: buffer')
+      buffer_allocation = f'allocate(character(len=length_glob)::buffer({dim_string}))'
+
+    config['additonal_delcaration'] = '\n'.join([' '*nspace + i for i in config['additonal_delcaration']]) + '\n'
+
+    cps = []
+    if rank == 0:
+      length_calculation = 'length=len(array)'
+      cps = ['buffer = array']
+    else:
+      length_calculation = 'length=len(array({:s}))'.format('1,'*(rank-1)+'1')
+      temp_n = 0
+      for i in range(1, rank+1):
+        cps.append(temp_n*' ' + f'do i_{i} = 1, dimsm({i})')
+        temp_n += 2
+      index_string = ','.join([f'i_{i}' for i in range(1, rank+1)])
+      cps.append(' '*(temp_n) + f'buffer({index_string}) = array({index_string})')
+      temp_n -= 2
+      for i in range(1, rank+1):
+        cps.append(temp_n*' ' + f'end do')
+        temp_n -= 2
+    cps = ['    ' + i for i in cps]
+
+
+    config['dtype_creation'] = [
+      length_calculation,
+      'length_glob = length',
+      'if (processor_write .ne. -1) then',
+      '  call MPI_Bcast(length, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)',
+      'else',
+      '  call MPI_Allreduce(length, length_glob, 1, mpi_hsize_t, MPI_MAX, mpi_comm, mpi_ierr)',
+      '  if (length .ne. length_glob) then',
+      f'    {buffer_allocation}'] + cps + [
+      '  end if',
+      'end if',
+      'call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)',
+      'call h5tset_size_f(dtype_id, length_glob, hdferror)'
+    ]
+    config['dtype_creation'] = '\n'.join([' '*nspace + i for i in config['dtype_creation']]) + '\n'
+
+
+    config['additional_attribute'] = [
+      "call hdf_write_attribute(dset_id, '', 'char_length', int(length_glob, kind=4))"
+    ]
+    config['additional_attribute'] = '\n'.join([' '*nspace + i for i in config['additional_attribute']]) + '\n'
+
+    config['additional_close'] = [
+      'call h5tclose_f(dtype_id, hdferror)',
+      'if (length .ne. length_glob .and. processor_write .eq. -1) then',
+      '  deallocate(buffer)',
+      'end if'
+    ]
+    config['additional_close'] = '\n'.join([' '*nspace + i for i in config['additional_close']])+'\n'
+
+
+
+  if rank == 0:
+    return write_single_value_template.format(**config)
+  else:
+    return write_array_template.format(**config)
 
 # %%
 

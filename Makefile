@@ -44,10 +44,10 @@ parallel.o: hdf5_utils_mpi.o
 %.o : %.f90
 	$(FC) $(FFLAGS) -c -o $@ $<
 
-hdf5_utils_mpi.f90 : FORCE
-	cd core && python gen_code.py
+# hdf5_utils_mpi.f90 : FORCE
+# 	cd core && python gen_code.py
 
-FORCE:
+# FORCE:
 
 docs:
 	cd docs; doxygen HDF5_utils.doxy

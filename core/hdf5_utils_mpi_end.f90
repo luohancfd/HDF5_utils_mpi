@@ -10,7 +10,7 @@
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, intent(out) :: array                ! data to be written
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -43,7 +43,7 @@
     integer, intent(out) :: array(:)            ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -53,7 +53,7 @@
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -77,7 +77,7 @@
     integer, intent(out) :: array(:, :)           ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -87,7 +87,7 @@
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -111,7 +111,7 @@
     integer, intent(out) :: array(:, :, :)         ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -121,7 +121,7 @@
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -145,7 +145,7 @@
     integer, intent(out) :: array(:, :, :, :)       ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -155,7 +155,7 @@
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -179,7 +179,7 @@
     integer, intent(out) :: array(:, :, :, :, :)     ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -189,7 +189,7 @@
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -213,7 +213,7 @@
     integer, intent(out) :: array(:, :, :, :, :, :)   ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -223,7 +223,7 @@
 
     ! set rank and dims
     rank = 6
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -250,7 +250,7 @@
     character(len=*), intent(in) :: dset_name   ! name of dataset
     real(sp), intent(out) :: array              ! data to be written
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -283,7 +283,7 @@
     real(sp), intent(out) :: array(:)            ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -293,7 +293,7 @@
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -317,7 +317,7 @@
     real(sp), intent(out) :: array(:, :)          ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -327,7 +327,7 @@
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -351,7 +351,7 @@
     real(sp), intent(out) :: array(:, :, :)        ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -361,7 +361,7 @@
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -385,7 +385,7 @@
     real(sp), intent(out) :: array(:, :, :, :)      ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -395,7 +395,7 @@
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -419,7 +419,7 @@
     real(sp), intent(out) :: array(:, :, :, :, :)    ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -429,7 +429,7 @@
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -453,7 +453,7 @@
     real(sp), intent(out) :: array(:, :, :, :, :, :)  ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -463,7 +463,7 @@
 
     ! set rank and dims
     rank = 6
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -490,7 +490,7 @@
     character(len=*), intent(in) :: dset_name   ! name of dataset
     real(dp), intent(out) :: array               ! data to be written
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -523,7 +523,7 @@
     real(dp), intent(out) :: array(:)            ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -533,7 +533,7 @@
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -557,7 +557,7 @@
     real(dp), intent(out) :: array(:, :)          ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -567,7 +567,7 @@
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -591,7 +591,7 @@
     real(dp), intent(out) :: array(:, :, :)        ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -601,7 +601,7 @@
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -625,7 +625,7 @@
     real(dp), intent(out) :: array(:, :, :, :)      ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -635,7 +635,7 @@
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -659,7 +659,7 @@
     real(dp), intent(out) :: array(:, :, :, :, :)    ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -669,7 +669,7 @@
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -693,7 +693,7 @@
     real(dp), intent(out) :: array(:, :, :, :, :, :)  ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -703,7 +703,7 @@
 
     ! set rank and dims
     rank = 6
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -731,7 +731,7 @@
     character(len=*), intent(out) :: array      ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1), length
+    integer(HSIZE_T) :: dims(1), length
     integer(HID_T) :: dset_id, dspace_id, dtype_id
     integer :: hdferror
 
@@ -786,7 +786,7 @@
     character(len=*), intent(out) :: array(:)   ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims_in(1), dims(1), max_dims(1), ii, length
+    integer(HSIZE_T) :: dims_in(1), dims(1), max_dims(1), ii, length
     integer(HID_T) :: dset_id, dspace_id, dtype_id
     character(len=:), dimension(:), allocatable :: buffer
     integer :: hdferror
@@ -858,7 +858,7 @@
     character(len=*), intent(out) :: array(:, :)   ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims_in(2), dims(2), max_dims(2), ii, jj, length
+    integer(HSIZE_T) :: dims_in(2), dims(2), max_dims(2), ii, jj, length
     integer(HID_T) :: dset_id, dspace_id, dtype_id
     character(len=:), dimension(:, :), allocatable :: buffer
     integer :: hdferror
@@ -936,7 +936,7 @@
     complex(dp), intent(out) :: array           ! data to be read
     real(dp) :: buffer(2)                       ! buffer to save real and imag part
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -972,7 +972,7 @@
     real(dp), allocatable, dimension(:, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -982,7 +982,7 @@
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -1011,7 +1011,7 @@
     real(dp), allocatable, dimension(:, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -1021,7 +1021,7 @@
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -1050,7 +1050,7 @@
     real(dp), allocatable, dimension(:, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -1060,7 +1060,7 @@
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -1089,7 +1089,7 @@
     real(dp), allocatable, dimension(:, :, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -1099,7 +1099,7 @@
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -1128,7 +1128,7 @@
     real(dp), allocatable, dimension(:, :, :, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -1138,7 +1138,7 @@
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -1167,7 +1167,7 @@
     real(dp), allocatable, dimension(:, :, :, :, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -1177,7 +1177,7 @@
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -1209,7 +1209,7 @@
     character(len=*), intent(in) :: attr_name   ! name of attribute
     integer, intent(in) :: array                 ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1264,7 +1264,7 @@
     integer, intent(in) :: array(:)              ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1288,7 +1288,7 @@
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
     call h5screate_simple_f(rank, dims, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
@@ -1311,6 +1311,60 @@
 
   end subroutine hdf_write_attr_integer_1
 
+  subroutine hdf_write_attr_integer_1_8(loc_id, obj_name, attr_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: obj_name    ! object name attribute will be attached to (if "" use loc_id)
+    character(len=*), intent(in) :: attr_name   ! name of attribute
+    integer(HSIZE_T), intent(in) :: array(:)    ! data to write to attribute
+
+    integer :: rank
+    integer(HSIZE_T) :: dims(1)
+    integer(HID_T) :: obj_id, aspace_id, attr_id
+    integer :: hdferror
+    logical :: attr_exists
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_write_attr_integer_1_8: "//trim(obj_name)//"/"//trim(attr_name)
+    end if
+
+    ! open object
+    if (obj_name == "") then
+      obj_id = loc_id
+    else
+      call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
+
+    ! create dataspace
+    rank = 1
+    dims = shape(array, KIND=HSIZE_T)
+    call h5screate_simple_f(rank, dims, aspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create attribute
+    call h5acreate_f(obj_id, attr_name, H5T_NATIVE_INTEGER, aspace_id, attr_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write dataset, the data is write as 4 bytes integer
+    call h5awrite_f(attr_id, H5T_NATIVE_INTEGER, int(array), dims, hdferror)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5aclose_f(attr_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+    call h5sclose_f(aspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5sclose: ", hdferror
+    if (obj_name /= "") then
+      call h5oclose_f(obj_id, hdferror)
+    end if
+  end subroutine hdf_write_attr_integer_1_8
+
   !  \brief writes a scalar attribute
   subroutine hdf_write_attr_real_0(loc_id, obj_name, attr_name, array)
 
@@ -1320,7 +1374,7 @@
     real(sp), intent(in) :: array                ! data to write to attribute
 
     !integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1375,7 +1429,7 @@
     real(sp), intent(in) :: array(:)             ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1399,7 +1453,7 @@
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
     call h5screate_simple_f(rank, dims, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
@@ -1431,7 +1485,7 @@
     real(dp), intent(in) :: array                ! data to write to attribute
 
     !integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1486,7 +1540,7 @@
     real(dp), intent(in) :: array(:)             ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1510,7 +1564,7 @@
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
     call h5screate_simple_f(rank, dims, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
@@ -1541,7 +1595,7 @@
     character(len=*), intent(in) :: attr_name   ! name of attribute
     character(len=*), intent(in) :: array        ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, type_id, aspace_id, attr_id
     integer :: hdferror
     logical :: attr_exists
@@ -1564,7 +1618,7 @@
     end if
 
     ! create type_id and aspace_id
-    dims(1) = len(array, KIND=HID_T)
+    dims(1) = len(array, KIND=HSIZE_T)
     call h5tcopy_f(H5T_NATIVE_CHARACTER, type_id, hdferror)
     !write(*,*) 'h5tcopy_f returns', type_id
     call h5tset_size_f(type_id, dims(1), hdferror)
@@ -1603,7 +1657,7 @@
     character(len=*), intent(in) :: attr_name   ! name of attribute
     integer, intent(out) :: array                ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -1644,7 +1698,7 @@
     integer, intent(out) :: array(:)             ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -1661,7 +1715,7 @@
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! create attribute
     call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
@@ -1688,7 +1742,7 @@
     character(len=*), intent(in) :: attr_name   ! name of attribute
     real(sp), intent(out) :: array               ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -1729,7 +1783,7 @@
     real(sp), intent(out) :: array(:)            ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -1746,7 +1800,7 @@
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! create attribute
     call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
@@ -1773,7 +1827,7 @@
     character(len=*), intent(in) :: attr_name   ! name of attribute
     real(dp), intent(out) :: array               ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -1814,7 +1868,7 @@
     real(dp), intent(out) :: array(:)            ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -1831,7 +1885,7 @@
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! create attribute
     call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
@@ -1858,7 +1912,7 @@
     character(len=*), intent(in) :: attr_name   ! name of attribute
     character(len=*), intent(out) :: array       ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, type_id, attr_id
     integer :: hdferror
 
@@ -1874,7 +1928,7 @@
     end if
 
     ! create type_id
-    dims(1) = len(array, KIND=HID_T)
+    dims(1) = len(array, KIND=HSIZE_T)
     call h5tcopy_f(H5T_NATIVE_CHARACTER, type_id, hdferror)
     !write(*,*) 'h5tcopy_f returns', type_id
     call h5tset_size_f(type_id, dims(1), hdferror)

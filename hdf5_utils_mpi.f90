@@ -47,18 +47,40 @@ module hdf5_utils_mpi
   private :: hdf_preset_prop, hdf_close_prop
 
   !>  \brief Generic interface to write a dataset
-  !>
   !>  Supported types
   !>   - integers (scalar and 1d-6d arrays)
   !>   - doubles (scalar and 1d-6d arrays)
   !>   - reals (scalar and 1d-6d arrays)
   !>   - string (scalar and 1d-2d arrays)
+  !>   - complex double number (compound data type, "r"/"i" for real and imaginary part, scalar and 1d-6d arrays)
   !>
-  !>  \param[in] loc_id     local id in file
-  !>  \param[in] dset_name  name of dataset
+  !>  \param[in] loc_id     local id in file, e.g. file_id
+  !>  \param[in] dset_name  name of dataset, NOTE: HDF5 assumes the dataset doesn't exist before !!
   !>  \param[in] array      data array to be written
   !>  \param[in] chunks     (optional) chunk size for dataset
   !>  \param[in] filter     (optional) filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+  !>  \param[in] processor  (optional, default=-1) processor that provides the data, -1 if the data is the same on all processors.
+  !>
+  !>  if processor != -1, the following options become useless
+  !>  \param[in] axis       (optional, default=-1) dimension on which the data will be stacked, starting from 1
+  !>
+  !>  \details
+  !>    - a variable with the name "num_reacts". All processors have the same data. We only want one copy saved in the final file
+  !>          call hdf_write_dataset(file_id, "num_reacts", num_reacts)
+  !>    - a variable with the name "num_reacts_0". All processors have this variable but different shape and content.
+  !>          we only want to save the copy on processor 0 (first processor)
+  !>          call hdf_write_dataset(file_id, "num_reacts_0", num_reacts_0, processor=0)
+  !>    - a scalar variable with the name "num_particle". All processors have this variable with different values. We want to save all of them.
+  !>          call hdf_write_dataset(file_id, "num_particle", num_particle, axis=1)
+  !>       (Note: the result of this call is an array with its size equal to the number of processors will be save to the hdf5 file. If you want to add
+  !>        them up and then save the result, you need to do the calculation by yourself)
+  !>    - an array "x_loc(XSIZE, YSIZE, ZSIZE)". All processors have this variable with different values. In addition, the meaningful data is not the whole
+  !>      array but "x_loc(xstart:xend, ystart:yend, 1:num)" (xstart, xend, ystart, yend are the same across processors but num is has different values
+  !>      on each processor). To stack the variable on the third dimension, use the following call. The API will set hyperslab based on the shape of array provided
+  !>          call hdf_write_dataset(file_id, "x_loc", x_loc(xstart:xend, ystart:yend, 1:num), axis=3)
+  !>    The function will also save the number of rows contributed by each processor as an attribute.
+
+
   interface hdf_write_dataset
     module procedure hdf_write_dataset_integer_0
     module procedure hdf_write_dataset_integer_1
@@ -201,12 +223,22 @@ module hdf5_utils_mpi
   interface hdf_write_attribute
     module procedure hdf_write_attr_integer_0
     module procedure hdf_write_attr_integer_1
+    module procedure hdf_write_attr_integer_1_8  ! kind = 8 integer
     module procedure hdf_write_attr_real_0
     module procedure hdf_write_attr_real_1
     module procedure hdf_write_attr_double_0
     module procedure hdf_write_attr_double_1
     module procedure hdf_write_attr_string
   end interface hdf_write_attribute
+
+  !>  \brief Get the appropriate mpi integer type
+  !>  \param[in] int_number  an integer number
+  !>  \return    MPI_TYPE for MPI communication
+  interface hdf_get_mpi_int
+    module procedure hdf_get_mpi_int_4
+    module procedure hdf_get_mpi_int_8
+    module procedure hdf_get_mpi_int_16
+  end interface hdf_get_mpi_int
 
   !>  \brief Generic interface to read attribute
   !>
@@ -252,7 +284,7 @@ module hdf5_utils_mpi
 
   !
   ! property list for parallel API
-  integer :: mpi_comm, mpi_irank, mpi_nrank, mpi_ierr
+  integer :: mpi_comm, mpi_irank, mpi_nrank, mpi_ierr, mpi_hsize_t
   integer(HID_T) :: file_plist_id   !< parallel file access property
   integer(HID_T) :: dplist_collective, dplist_independent !< dataset access property
 
@@ -390,6 +422,7 @@ contains
 
     integer :: hdferror
     character(len=16) :: status2, action2
+    integer(HSIZE_T) :: temp
 
     if (hdf_print_messages) then
       write (*, '(A)') "->hdf_open_file: "//trim(filename)
@@ -409,6 +442,7 @@ contains
     mpi_comm = MPI_COMM_WORLD
     call MPI_COMM_SIZE(MPI_COMM_WORLD, mpi_nrank, mpi_ierr)
     call MPI_COMM_RANK(MPI_COMM_WORLD, mpi_irank, mpi_ierr)
+    mpi_hsize_t = hdf_get_mpi_int(temp)
 
     ! set up file access property list with parallel I/O access
     call h5pcreate_f(H5P_FILE_ACCESS_F, file_plist_id, hdferror)
@@ -441,6 +475,10 @@ contains
 
     call hdf_preset_prop()
 
+    if ((status2 .ne. 'OLD') .or. (action2 == 'WRITE') .or. (action2 == 'READWRITE')) then
+      call hdf_preset_file_attribute(file_id)
+    end if
+
     !write(*,'(A20,I0)') "h5fcreate: ", hdferror
 
   end subroutine hdf_open_file
@@ -466,14 +504,22 @@ contains
 
   end subroutine hdf_close_file
 
+  !>  \brief Preset some file-level attributes
+  subroutine hdf_preset_file_attribute(file_id)
+    implicit none
+    integer(HID_T), intent(in) :: file_id            !< HDF5 id of the file
+
+    call hdf_write_attribute(file_id, "", 'mpi_nrank', mpi_nrank)
+  end subroutine hdf_preset_file_attribute
+
   !>  \brief Preset some properties
   subroutine hdf_preset_prop()
     implicit none
     integer :: ii
-    integer(SIZE_T) ::offset
-    INTEGER(SIZE_T)     ::   type_sizei  ! Size of the integer datatype
-    INTEGER(SIZE_T)     ::   type_sized  ! Size of the double precision datatype
-    INTEGER(SIZE_T)     ::   type_sizer  ! Size of the real datatype
+    integer(HSIZE_T) ::offset
+    INTEGER(HSIZE_T)     ::   type_sizei  ! Size of the integer datatype
+    INTEGER(HSIZE_T)     ::   type_sized  ! Size of the double precision datatype
+    INTEGER(HSIZE_T)     ::   type_sizer  ! Size of the real datatype
     integer :: hdferror
 
     integer(HID_T) :: temp_int(3)
@@ -685,7 +731,7 @@ contains
     character(len=*), intent(in) :: dset_type   !< type of dataset (integer or double)
 
     integer :: rank
-    integer(SIZE_T) :: dims(8)
+    integer(HSIZE_T) :: dims(8)
     integer(HID_T) :: dset_id, dspace_id
     integer :: hdferror
 
@@ -695,7 +741,7 @@ contains
 
     ! set rank and dims
     rank = size(dset_dims, 1)
-    dims(1:rank) = int(dset_dims, SIZE_T)
+    dims(1:rank) = int(dset_dims, HSIZE_T)
 
     ! create dataspace
     call h5screate_simple_f(rank, dims, dspace_id, hdferror)
@@ -1153,8 +1199,8 @@ contains
 
     integer(HID_T), intent(inout) :: plist_id
     integer, intent(in) :: rank
-    integer(SIZE_T), intent(in) :: dims(:)
-    integer(SIZE_T), intent(inout) :: cdims(:)
+    integer(HSIZE_T), intent(in) :: dims(:)
+    integer(HSIZE_T), intent(inout) :: cdims(:)
     character(len=*), intent(in) :: filter
 
     integer :: hdferror
@@ -1198,32 +1244,57 @@ contains
 
   end subroutine hdf_set_property_list
 
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_get_mpi_int-----------------------------------------
+  !!----------------------------------------------------------------------------------------
 
+  function hdf_get_mpi_int_4(int_number) result(r)
+    implicit none
+    integer(kind=4), INTENT(IN) :: int_number
+    integer :: r
+    r = MPI_INTEGER4
+  end function hdf_get_mpi_int_4
+
+  function hdf_get_mpi_int_8(int_number) result(r)
+    implicit none
+    integer(kind=8), INTENT(IN) :: int_number
+    integer :: r
+    r = MPI_INTEGER8
+  end function hdf_get_mpi_int_8
+
+  function hdf_get_mpi_int_16(int_number) result(r)
+    implicit none
+    integer(kind=16), INTENT(IN) :: int_number
+    integer :: r
+    r = MPI_INTEGER16
+  end function hdf_get_mpi_int_16
   !!----------------------------------------------------------------------------------------
   !!--------------------------------hdf_write_dataset_integer--------------------------------
   !!----------------------------------------------------------------------------------------
 
   !  \brief write a scalar to a hdf5 file
-  subroutine hdf_write_dataset_integer_0(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_0(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array                      ! data to be written
     integer, optional, intent(in) :: chunks           ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis          ! axis used to stack the data among processors
 
-    integer(SIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id, dspace_id
+    integer :: rank
+    integer(HSIZE_T) :: dimsf(1), dimsm(1)
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: hdferror
-    integer :: processor_write
+    integer :: processor_write, axis_write
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer :: ii
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_0: "//trim(dset_name)
     end if
-
-    ! set rank and dims
-    dims = (/0/)
 
     !
     if (present(filter)) then
@@ -1241,470 +1312,1030 @@ contains
       processor_write = processor
     end if
 
-    ! create dataspace
-    call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
-    !write(*,'(A20,I0)') "h5screate_f: ", hdferror
+    ! set rank and dims
+    rank = 1
+    dimsm = (/0/)
+    dimsf = (/mpi_nrank/)
+
+    ! set axis, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
+
+    ! create dataspace and dataset
+    call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else
+      axis_write = 1
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+      offset(1) = mpi_irank
+      count(1)  = 1
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, count, hdferror)
+
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+      do ii = 1, mpi_nrank
+        offset_glob(ii) = ii - 1
+      end do
+      count_glob = 1
+    end if
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_0
 
   !  \brief write a 1 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_integer_1(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_1(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array(:)                   ! data to be written
     integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(1), cdims(1)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_1: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 1
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_integer_1: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_integer_1: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_integer_1: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 1
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 1 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 1
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_integer_1: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_1
 
   !  \brief write a 2 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_integer_2(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_2(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array(:,:)                 ! data to be written
     integer, optional, intent(in) :: chunks(2)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(2), cdims(2)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_2: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 2
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_integer_2: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_integer_2: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_integer_2: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 2
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 2 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 2
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_integer_2: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_2
 
   !  \brief write a 3 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_integer_3(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_3(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array(:,:,:)               ! data to be written
     integer, optional, intent(in) :: chunks(3)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(3), cdims(3)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_3: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 3
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_integer_3: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_integer_3: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_integer_3: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 3
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 3 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 3
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_integer_3: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_3
 
   !  \brief write a 4 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_integer_4(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_4(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array(:,:,:,:)             ! data to be written
     integer, optional, intent(in) :: chunks(4)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(4), cdims(4)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_4: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 4
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_integer_4: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_integer_4: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_integer_4: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 4
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 4 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 4
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_integer_4: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_4
 
   !  \brief write a 5 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_integer_5(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_5(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array(:,:,:,:,:)           ! data to be written
     integer, optional, intent(in) :: chunks(5)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(5), cdims(5)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_5: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 5
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_integer_5: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_integer_5: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_integer_5: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 5
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 5 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 5
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_integer_5: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_5
 
   !  \brief write a 6 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_integer_6(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_integer_6(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     integer, intent(in) :: array(:,:,:,:,:,:)         ! data to be written
     integer, optional, intent(in) :: chunks(6)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(6), cdims(6)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_integer_6: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 6
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_integer_6: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_integer_6: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_integer_6: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 6
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 6 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 6
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_INTEGER, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_integer_6: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_INTEGER, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_integer_6
@@ -1715,26 +2346,28 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief write a scalar to a hdf5 file
-  subroutine hdf_write_dataset_real_0(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_0(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array                     ! data to be written
     integer, optional, intent(in) :: chunks           ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis          ! axis used to stack the data among processors
 
-    integer(SIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id, dspace_id
+    integer :: rank
+    integer(HSIZE_T) :: dimsf(1), dimsm(1)
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: hdferror
-    integer :: processor_write
+    integer :: processor_write, axis_write
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer :: ii
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_0: "//trim(dset_name)
     end if
-
-    ! set rank and dims
-    dims = (/0/)
 
     !
     if (present(filter)) then
@@ -1752,470 +2385,1030 @@ contains
       processor_write = processor
     end if
 
-    ! create dataspace
-    call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
-    !write(*,'(A20,I0)') "h5screate_f: ", hdferror
+    ! set rank and dims
+    rank = 1
+    dimsm = (/0/)
+    dimsf = (/mpi_nrank/)
+
+    ! set axis, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
+
+    ! create dataspace and dataset
+    call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else
+      axis_write = 1
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+      offset(1) = mpi_irank
+      count(1)  = 1
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, count, hdferror)
+
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+      do ii = 1, mpi_nrank
+        offset_glob(ii) = ii - 1
+      end do
+      count_glob = 1
+    end if
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_0
 
   !  \brief write a 1 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_real_1(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_1(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array(:)                  ! data to be written
     integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(1), cdims(1)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_1: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 1
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_real_1: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_real_1: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_real_1: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 1
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 1 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 1
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_real_1: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_1
 
   !  \brief write a 2 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_real_2(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_2(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array(:,:)                ! data to be written
     integer, optional, intent(in) :: chunks(2)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(2), cdims(2)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_2: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 2
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_real_2: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_real_2: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_real_2: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 2
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 2 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 2
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_real_2: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_2
 
   !  \brief write a 3 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_real_3(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_3(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array(:,:,:)              ! data to be written
     integer, optional, intent(in) :: chunks(3)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(3), cdims(3)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_3: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 3
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_real_3: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_real_3: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_real_3: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 3
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 3 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 3
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_real_3: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_3
 
   !  \brief write a 4 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_real_4(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_4(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array(:,:,:,:)            ! data to be written
     integer, optional, intent(in) :: chunks(4)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(4), cdims(4)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_4: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 4
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_real_4: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_real_4: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_real_4: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 4
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 4 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 4
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_real_4: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_4
 
   !  \brief write a 5 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_real_5(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_5(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array(:,:,:,:,:)          ! data to be written
     integer, optional, intent(in) :: chunks(5)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(5), cdims(5)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_5: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 5
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_real_5: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_real_5: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_real_5: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 5
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 5 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 5
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_real_5: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_5
 
   !  \brief write a 6 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_real_6(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_real_6(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(sp), intent(in) :: array(:,:,:,:,:,:)        ! data to be written
     integer, optional, intent(in) :: chunks(6)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(6), cdims(6)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_real_6: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 6
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_real_6: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_real_6: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_real_6: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 6
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 6 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 6
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_REAL, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_real_6: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_REAL, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_real_6
@@ -2226,26 +3419,28 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief write a scalar to a hdf5 file
-  subroutine hdf_write_dataset_double_0(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_0(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array                     ! data to be written
     integer, optional, intent(in) :: chunks           ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis          ! axis used to stack the data among processors
 
-    integer(SIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id, dspace_id
+    integer :: rank
+    integer(HSIZE_T) :: dimsf(1), dimsm(1)
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: hdferror
-    integer :: processor_write
+    integer :: processor_write, axis_write
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer :: ii
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_0: "//trim(dset_name)
     end if
-
-    ! set rank and dims
-    dims = (/0/)
 
     !
     if (present(filter)) then
@@ -2263,470 +3458,1030 @@ contains
       processor_write = processor
     end if
 
-    ! create dataspace
-    call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
-    !write(*,'(A20,I0)') "h5screate_f: ", hdferror
+    ! set rank and dims
+    rank = 1
+    dimsm = (/0/)
+    dimsf = (/mpi_nrank/)
+
+    ! set axis, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
+
+    ! create dataspace and dataset
+    call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else
+      axis_write = 1
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+      offset(1) = mpi_irank
+      count(1)  = 1
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, count, hdferror)
+
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+      do ii = 1, mpi_nrank
+        offset_glob(ii) = ii - 1
+      end do
+      count_glob = 1
+    end if
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_0
 
   !  \brief write a 1 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_double_1(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_1(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array(:)                  ! data to be written
     integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(1), cdims(1)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_1: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 1
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_double_1: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_double_1: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_double_1: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 1
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 1 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 1
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_double_1: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_1
 
   !  \brief write a 2 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_double_2(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_2(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array(:,:)                ! data to be written
     integer, optional, intent(in) :: chunks(2)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(2), cdims(2)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_2: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 2
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_double_2: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_double_2: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_double_2: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 2
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 2 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 2
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_double_2: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_2
 
   !  \brief write a 3 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_double_3(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_3(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array(:,:,:)              ! data to be written
     integer, optional, intent(in) :: chunks(3)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(3), cdims(3)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_3: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 3
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_double_3: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_double_3: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_double_3: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 3
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 3 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 3
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_double_3: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_3
 
   !  \brief write a 4 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_double_4(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_4(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array(:,:,:,:)            ! data to be written
     integer, optional, intent(in) :: chunks(4)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(4), cdims(4)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_4: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 4
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_double_4: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_double_4: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_double_4: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 4
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 4 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 4
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_double_4: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_4
 
   !  \brief write a 5 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_double_5(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_5(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array(:,:,:,:,:)          ! data to be written
     integer, optional, intent(in) :: chunks(5)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(5), cdims(5)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_5: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 5
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_double_5: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_double_5: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_double_5: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 5
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 5 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 5
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_double_5: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_5
 
   !  \brief write a 6 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_double_6(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_double_6(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     real(dp), intent(in) :: array(:,:,:,:,:,:)        ! data to be written
     integer, optional, intent(in) :: chunks(6)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(6), cdims(6)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_double_6: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 6
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_double_6: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_double_6: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_double_6: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 6
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 6 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 6
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, H5T_NATIVE_DOUBLE, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_double_6: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_independent)
-      end if
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsf, hdferror, &
+                      file_space_id=file_space_id,               &
+                      mem_space_id=mem_space_id,                 &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_double_6
@@ -2737,29 +4492,31 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief write a scalar to a hdf5 file
-  subroutine hdf_write_dataset_character_0(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_character_0(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     character(len=*), intent(in) :: array             ! data to be written
     integer, optional, intent(in) :: chunks           ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis          ! axis used to stack the data among processors
 
-    integer(SIZE_T) :: dims(1), length
-    integer(HID_T) :: dset_id, dspace_id, dtype_id
+    integer :: rank
+    integer(HSIZE_T) :: dimsf(1), dimsm(1)
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: hdferror
-    integer :: processor_write
+    integer :: processor_write, axis_write
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer :: ii
+    integer(HSIZE_T) :: length, length_glob
+    integer(HID_T) :: dtype_id
+    character(len=:),allocatable :: buffer
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_character_0: "//trim(dset_name)
     end if
-
-    ! set rank, dims, dtype
-    dims = (/0/)
-    length = len(array)
-    call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)
-    call h5tset_size_f(dtype_id, length, hdferror)
 
     !
     if (present(filter)) then
@@ -2777,184 +4534,508 @@ contains
       processor_write = processor
     end if
 
-    ! create dataspace
-    call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
-    !write(*,'(A20,I0)') "h5screate_f: ", hdferror
-
-    ! create dataset
-    call h5dcreate_f(loc_id, dset_name, dtype_id, dspace_id, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! write dataset
-    if (processor_write == -1) then
-      call h5dwrite_f(dset_id, dtype_id, array, dims, hdferror, xfer_prp=dplist_collective)
+    ! set rank and dims
+    rank = 1
+    dimsm = (/0/)
+    dimsf = (/mpi_nrank/)
+    length=len(array)
+    length_glob = length
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(length, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
     else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, dtype_id, array, dims, hdferror, xfer_prp=dplist_independent)
+      call MPI_Allreduce(length, length_glob, 1, mpi_hsize_t, MPI_MAX, mpi_comm, mpi_ierr)
+      if (length .ne. length_glob) then
+        allocate(character(len=length_glob)::buffer)
+        buffer = array
       end if
     end if
+    call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)
+    call h5tset_size_f(dtype_id, length_glob, hdferror)
+
+    ! set axis, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
+
+    ! create dataspace and dataset
+    call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else
+      axis_write = 1
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
+
+    ! create dataset
+    call h5dcreate_f(loc_id, dset_name, dtype_id, file_space_id, dset_id, hdferror)
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+      offset(1) = mpi_irank
+      count(1)  = 1
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, count, hdferror)
+
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+      do ii = 1, mpi_nrank
+        offset_glob(ii) = ii - 1
+      end do
+      count_glob = 1
+    end if
+
+    ! write dataset
+    if (length .eq. length_glob) then
+      if (processor_write == -1) then
+        call h5dwrite_f(dset_id, dtype_id, array, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_collective)
+      else if (mpi_irank == processor_write) then
+        call h5dwrite_f(dset_id, dtype_id, array, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_independent)
+      end if
+    else
+      if (processor_write == -1) then
+        call h5dwrite_f(dset_id, dtype_id, buffer, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_collective)
+      else if (mpi_irank == processor_write) then
+        call h5dwrite_f(dset_id, dtype_id, buffer, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_independent)
+      end if
+    end if
+
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+    call hdf_write_attribute(dset_id, '', 'char_length', int(length_glob, kind=4))
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
     call h5tclose_f(dtype_id, hdferror)
+    if (length .ne. length_glob .and. processor_write .eq. -1) then
+      deallocate(buffer)
+    end if
 
   end subroutine hdf_write_dataset_character_0
 
   !  \brief write a 1 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_character_1(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_character_1(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     character(len=*), intent(in) :: array(:)          ! data to be written
     integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(1), cdims(1), length
-    integer(HID_T) :: dset_id, dspace_id, plist_id, dtype_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer(HSIZE_T) :: length, length_glob
+    integer(HID_T) :: dtype_id
+    integer :: i_1
+    character(len=:), dimension(:), allocatable :: buffer
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_character_1: "//trim(dset_name)
     end if
 
-    ! set rank, dims, dtype
-    rank = 1
-    dims = shape(array, KIND=HID_T)
-    length=len(array(1))
-    call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)
-    call h5tset_size_f(dtype_id, length, hdferror)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_character_1: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_character_1: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_character_1: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 1
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+    length=len(array(1))
+    length_glob = length
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(length, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    else
+      call MPI_Allreduce(length, length_glob, 1, mpi_hsize_t, MPI_MAX, mpi_comm, mpi_ierr)
+      if (length .ne. length_glob) then
+        allocate(character(len=length_glob)::buffer(dimsm(1)))
+        do i_1 = 1, dimsm(1)
+          buffer(i_1) = array(i_1)
+        end do
+      end if
+    end if
+    call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)
+    call h5tset_size_f(dtype_id, length_glob, hdferror)
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 1 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 1
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, dtype_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, dtype_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
-    if (processor_write == -1) then
-      call h5dwrite_f(dset_id, dtype_id, array, dims, hdferror, xfer_prp=dplist_collective)
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
     else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, dtype_id, array, dims, hdferror, xfer_prp=dplist_independent)
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_character_1: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
+
+    ! write dataset
+    if (length .eq. length_glob) then
+      if (processor_write == -1) then
+        call h5dwrite_f(dset_id, dtype_id, array, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_collective)
+      else if (mpi_irank == processor_write) then
+        call h5dwrite_f(dset_id, dtype_id, array, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_independent)
+      end if
+    else
+      if (processor_write == -1) then
+        call h5dwrite_f(dset_id, dtype_id, buffer, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_collective)
+      else if (mpi_irank == processor_write) then
+        call h5dwrite_f(dset_id, dtype_id, buffer, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_independent)
       end if
     end if
+
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+    call hdf_write_attribute(dset_id, '', 'char_length', int(length_glob, kind=4))
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
     call h5tclose_f(dtype_id, hdferror)
+    if (length .ne. length_glob .and. processor_write .eq. -1) then
+      deallocate(buffer)
+    end if
 
   end subroutine hdf_write_dataset_character_1
 
   !  \brief write a 2 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_character_2(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_character_2(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     character(len=*), intent(in) :: array(:,:)        ! data to be written
     integer, optional, intent(in) :: chunks(2)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(2), cdims(2), length
-    integer(HID_T) :: dset_id, dspace_id, plist_id, dtype_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer(HSIZE_T) :: length, length_glob
+    integer(HID_T) :: dtype_id
+    integer :: i_1, i_2
+    character(len=:), dimension(:,:), allocatable :: buffer
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_character_2: "//trim(dset_name)
     end if
 
-    ! set rank, dims, dtype
-    rank = 2
-    dims = shape(array, KIND=HID_T)
-    length=len(array(1,1))
-    call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)
-    call h5tset_size_f(dtype_id, length, hdferror)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_character_2: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_character_2: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_character_2: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 2
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+    length=len(array(1,1))
+    length_glob = length
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(length, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    else
+      call MPI_Allreduce(length, length_glob, 1, mpi_hsize_t, MPI_MAX, mpi_comm, mpi_ierr)
+      if (length .ne. length_glob) then
+        allocate(character(len=length_glob)::buffer(dimsm(1),dimsm(2)))
+        do i_1 = 1, dimsm(1)
+          do i_2 = 1, dimsm(2)
+            buffer(i_1,i_2) = array(i_1,i_2)
+          end do
+        end do
+      end if
+    end if
+    call h5tcopy_f(H5T_FORTRAN_S1, dtype_id, hdferror)
+    call h5tset_size_f(dtype_id, length_glob, hdferror)
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 2 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 2
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, dtype_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, dtype_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
-    if (processor_write == -1) then
-      call h5dwrite_f(dset_id, dtype_id, array, dims, hdferror, xfer_prp=dplist_collective)
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
     else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, dtype_id, array, dims, hdferror, xfer_prp=dplist_independent)
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_character_2: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
+
+    ! write dataset
+    if (length .eq. length_glob) then
+      if (processor_write == -1) then
+        call h5dwrite_f(dset_id, dtype_id, array, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_collective)
+      else if (mpi_irank == processor_write) then
+        call h5dwrite_f(dset_id, dtype_id, array, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_independent)
+      end if
+    else
+      if (processor_write == -1) then
+        call h5dwrite_f(dset_id, dtype_id, buffer, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_collective)
+      else if (mpi_irank == processor_write) then
+        call h5dwrite_f(dset_id, dtype_id, buffer, dimsf, hdferror, &
+                        file_space_id=file_space_id,               &
+                        mem_space_id=mem_space_id,                 &
+                        xfer_prp=dplist_independent)
       end if
     end if
+
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+    call hdf_write_attribute(dset_id, '', 'char_length', int(length_glob, kind=4))
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
     call h5tclose_f(dtype_id, hdferror)
+    if (length .ne. length_glob .and. processor_write .eq. -1) then
+      deallocate(buffer)
+    end if
 
   end subroutine hdf_write_dataset_character_2
 
@@ -2964,26 +5045,28 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief write a scalar to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_0(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_0(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array                  ! data to be written
     integer, optional, intent(in) :: chunks           ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis          ! axis used to stack the data among processors
 
-    integer(SIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id, dspace_id
+    integer :: rank
+    integer(HSIZE_T) :: dimsf(1), dimsm(1)
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: hdferror
-    integer :: processor_write
+    integer :: processor_write, axis_write
+    integer(HSIZE_T), dimension(1) :: offset, count
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer :: ii
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_0: "//trim(dset_name)
     end if
-
-    ! set rank and dims
-    dims = (/0/)
 
     !
     if (present(filter)) then
@@ -3001,512 +5084,1114 @@ contains
       processor_write = processor
     end if
 
-    ! create dataspace
-    call h5screate_f(H5S_SCALAR_F, dspace_id, hdferror)
-    !write(*,'(A20,I0)') "h5screate_f: ", hdferror
+    ! set rank and dims
+    rank = 1
+    dimsm = (/0/)
+    dimsf = (/mpi_nrank/)
+
+    ! set axis, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
+
+    ! create dataspace and dataset
+    call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else
+      axis_write = 1
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+      offset(1) = mpi_irank
+      count(1)  = 1
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, count, hdferror)
+
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+      do ii = 1, mpi_nrank
+        offset_glob(ii) = ii - 1
+      end do
+      count_glob = 1
+    end if
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_0
 
   !  \brief write a 1 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_1(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_1(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array(:)               ! data to be written
     integer, optional, intent(in) :: chunks(1)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(1), cdims(1)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_1: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 1
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_1: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_1: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_complex_double_1: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 1
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 1 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 1
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_complex_double_1: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_1
 
   !  \brief write a 2 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_2(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_2(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array(:,:)             ! data to be written
     integer, optional, intent(in) :: chunks(2)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(2), cdims(2)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_2: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 2
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_2: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_2: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_complex_double_2: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 2
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 2 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 2
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_complex_double_2: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_2
 
   !  \brief write a 3 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_3(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_3(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array(:,:,:)           ! data to be written
     integer, optional, intent(in) :: chunks(3)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(3), cdims(3)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_3: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 3
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_3: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_3: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_complex_double_3: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 3
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 3 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 3
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_complex_double_3: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_3
 
   !  \brief write a 4 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_4(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_4(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array(:,:,:,:)         ! data to be written
     integer, optional, intent(in) :: chunks(4)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(4), cdims(4)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_4: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 4
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_4: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_4: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_complex_double_4: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 4
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 4 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 4
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_complex_double_4: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_4
 
   !  \brief write a 5 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_5(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_5(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array(:,:,:,:,:)       ! data to be written
     integer, optional, intent(in) :: chunks(5)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(5), cdims(5)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_5: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 5
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_5: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_5: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_complex_double_5: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 5
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 5 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 5
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_complex_double_5: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_5
 
   !  \brief write a 6 - dimension array to a hdf5 file
-  subroutine hdf_write_dataset_complex_double_6(loc_id, dset_name, array, chunks, filter, processor)
+  subroutine hdf_write_dataset_complex_double_6(loc_id, dset_name, array, chunks, filter, processor, axis)
 
     integer(HID_T), intent(in) :: loc_id              ! local id in file
     character(len=*), intent(in) :: dset_name         ! name of dataset
     complex(dp), intent(in) :: array(:,:,:,:,:,:)     ! data to be written
     integer, optional, intent(in) :: chunks(6)        ! chunk size for dataset
     character(len=*), optional, intent(in) :: filter  ! filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
-    integer, optional, intent(in) :: processor        ! processor that write the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: processor        ! processor that provides the data. (-1: collective write, i.e. same data on each processor_write)
+    integer, optional, intent(in) :: axis             ! axis used to stack the data among processors
 
-    integer :: rank
-    integer(SIZE_T) :: dims(6), cdims(6)
-    integer(HID_T) :: dset_id, dspace_id, plist_id
+    integer :: rank, ii, jj
+    integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
     character(len=32) :: filter_case
-    integer :: hdferror
-    integer :: processor_write
+    integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
+    integer(HSIZE_T) :: offset_end
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_dataset_complex_double_6: "//trim(dset_name)
     end if
 
-    ! set rank and dims
-    rank = 6
-    dims = shape(array, KIND=HID_T)
-
-    !
+    ! set filter
     if (present(filter)) then
-      filter_case = filter
-    else
-      filter_case = hdf_default_filter
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_6: warning filter not used"
     end if
 
     ! set chunk (if needed)
     if (present(chunks)) then
-      cdims = int(chunks, SIZE_T)
-    else
-      cdims = 0
+      write (*, '(A)') "--->hdf_write_dataset_complex_double_6: warning chunks not used"
     end if
 
     ! set processor_write
     processor_write = -1
     if (present(processor)) then
-      processor_write = processor
+      if ((processor .ge. 0) .and. (processor .lt. mpi_nrank)) then
+        processor_write = processor
+      else
+        write (*, '(A, I2)') "--->hdf_write_dataset_complex_double_6: illegal processor = ", processor
+      end if
     end if
 
-    ! create and set property list
-    call h5pcreate_f(H5P_DATASET_CREATE_F, plist_id, hdferror)
-    call hdf_set_property_list(plist_id, rank, dims, cdims, filter_case)
+    ! set rank and dims
+    rank = 6
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (processor_write .ne. -1) then
+      call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
+    end if
+    dimsf = dimsm
+
+    ! set axis_write, might be changed later
+    axis_write = -1
+    if (processor_write == -1) then
+      if (present(axis)) then
+        axis_write = axis
+      end if
+    end if
 
     ! create dataspace
-    call h5screate_simple_f(rank, dims, dspace_id, hdferror)
+    call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+    if (axis_write .eq. -1) then
+      file_space_id = mem_space_id
+    else if (axis_write > 6 .or. axis_write == 0) then
+      write(*, '(A, I3, A, I3)') "Axis = ", axis_write, " is larger than array dim=", 6
+      stop
+    else
+      call MPI_Allreduce(dimsm(axis_write), dimsf(axis_write), 1, mpi_hsize_t, MPI_SUM, mpi_comm, mpi_ierr)
+      call h5screate_simple_f(rank, dimsf, file_space_id, hdferror)
+    end if
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
     ! create dataset
-    call h5dcreate_f(loc_id, dset_name, complexd_type_id, dspace_id, dset_id, hdferror, dcpl_id=plist_id)
+    call h5dcreate_f(loc_id, dset_name, complexd_type_id, file_space_id, dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! select hyperslab if needed
+    if (axis_write .eq. -1) then
+      mem_space_id = H5S_ALL_F
+    else
+      call h5sclose_f(file_space_id, hdferror)
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+
+      ! set offset information
+      offset = 0
+      if (mpi_irank .ne. 0) then
+        call MPI_Recv(offset_end, 1, mpi_hsize_t, mpi_irank-1, MPI_ANY_TAG, mpi_comm, status, mpi_ierr)
+        offset(axis_write) = offset_end
+      end if
+      offset_end = offset(axis_write) + dimsm(axis_write)
+      if (mpi_irank < mpi_nrank - 1) then
+        call MPI_Send(offset_end, 1, mpi_hsize_t, mpi_irank+1, 0, mpi_comm, mpi_ierr)
+      end if
+
+      ! gather offset information
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+
+      ! first check if other axises have the same dimension
+      if (mpi_nrank > 1) then
+        do ii = 1, rank
+          if (ii .ne. axis_write) then
+            call MPI_Gather(dimsm(ii),      1, mpi_hsize_t,   &
+                            offset_glob,  1, mpi_hsize_t,   &
+                            0, mpi_comm, mpi_ierr)
+            if (mpi_irank == 0) then
+              do jj = 2, mpi_nrank
+                if (offset_glob(jj) .ne. offset_glob(1)) then
+                  write (*, '(A, A, I3, A)') "--->hdf_write_dataset_complex_double_6: "//trim(dset_name), &
+                    " axis=", ii, " doesn't have the same size across processors"
+                  call MPI_Abort(mpi_comm, 1, mpi_ierr)
+                end if
+              end do
+            end if
+          end if
+        end do
+      end if
+
+      call MPI_Allgather(offset(axis_write), 1, mpi_hsize_t,   &
+                         offset_glob,        1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call MPI_Allgather(dimsm(axis_write),  1, mpi_hsize_t,   &
+                         count_glob,         1, mpi_hsize_t,   &
+                         mpi_comm, mpi_ierr)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset, dimsm, hdferror)
+    end if
+
 
     ! write dataset
     if (processor_write == -1) then
-      call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
       call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                      dims, hdferror, xfer_prp=dplist_complex_collective)
-    else
-      if (mpi_irank == processor_write) then
-        call h5dwrite_f(dset_id, complexd_field_id(1), real(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-        call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
-                    dims, hdferror, xfer_prp=dplist_independent)
-      end if
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_complex_collective)
+    else if (mpi_irank == processor_write) then
+      call h5dwrite_f(dset_id, complexd_field_id(1), real(array),  &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
+      call h5dwrite_f(dset_id, complexd_field_id(2), aimag(array), &
+                      dimsf, hdferror,                             &
+                      file_space_id=file_space_id,                 &
+                      mem_space_id=mem_space_id,                   &
+                      xfer_prp=dplist_independent)
     end if
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
+    ! write attributes
+    call hdf_write_attribute(dset_id, '', 'processor', processor_write)
+    call hdf_write_attribute(dset_id, '', 'axis_write',      axis_write)
+    if (axis_write .ne. -1) then
+      call hdf_write_attribute(dset_id, '', 'offset',    offset_glob)
+      call hdf_write_attribute(dset_id, '', 'count',     count_glob)
+      deallocate(offset_glob, count_glob)
+    end if
+
     ! close all id's
-    call h5sclose_f(dspace_id, hdferror)
-    call h5pclose_f(plist_id, hdferror)
+    if (axis_write .ne. -1) then
+      call h5sclose_f(mem_space_id, hdferror)
+    end if
+    call h5sclose_f(file_space_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
   end subroutine hdf_write_dataset_complex_double_6
@@ -3523,7 +6208,7 @@ contains
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, intent(out) :: array                ! data to be written
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3556,7 +6241,7 @@ contains
     integer, intent(out) :: array(:)            ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3566,7 +6251,7 @@ contains
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3590,7 +6275,7 @@ contains
     integer, intent(out) :: array(:, :)           ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3600,7 +6285,7 @@ contains
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3624,7 +6309,7 @@ contains
     integer, intent(out) :: array(:, :, :)         ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3634,7 +6319,7 @@ contains
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3658,7 +6343,7 @@ contains
     integer, intent(out) :: array(:, :, :, :)       ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3668,7 +6353,7 @@ contains
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3692,7 +6377,7 @@ contains
     integer, intent(out) :: array(:, :, :, :, :)     ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3702,7 +6387,7 @@ contains
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3726,7 +6411,7 @@ contains
     integer, intent(out) :: array(:, :, :, :, :, :)   ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3736,7 +6421,7 @@ contains
 
     ! set rank and dims
     rank = 6
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3763,7 +6448,7 @@ contains
     character(len=*), intent(in) :: dset_name   ! name of dataset
     real(sp), intent(out) :: array              ! data to be written
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3796,7 +6481,7 @@ contains
     real(sp), intent(out) :: array(:)            ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3806,7 +6491,7 @@ contains
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3830,7 +6515,7 @@ contains
     real(sp), intent(out) :: array(:, :)          ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3840,7 +6525,7 @@ contains
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3864,7 +6549,7 @@ contains
     real(sp), intent(out) :: array(:, :, :)        ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3874,7 +6559,7 @@ contains
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3898,7 +6583,7 @@ contains
     real(sp), intent(out) :: array(:, :, :, :)      ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3908,7 +6593,7 @@ contains
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3932,7 +6617,7 @@ contains
     real(sp), intent(out) :: array(:, :, :, :, :)    ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3942,7 +6627,7 @@ contains
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -3966,7 +6651,7 @@ contains
     real(sp), intent(out) :: array(:, :, :, :, :, :)  ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -3976,7 +6661,7 @@ contains
 
     ! set rank and dims
     rank = 6
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4003,7 +6688,7 @@ contains
     character(len=*), intent(in) :: dset_name   ! name of dataset
     real(dp), intent(out) :: array               ! data to be written
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4036,7 +6721,7 @@ contains
     real(dp), intent(out) :: array(:)            ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4046,7 +6731,7 @@ contains
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4070,7 +6755,7 @@ contains
     real(dp), intent(out) :: array(:, :)          ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4080,7 +6765,7 @@ contains
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4104,7 +6789,7 @@ contains
     real(dp), intent(out) :: array(:, :, :)        ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4114,7 +6799,7 @@ contains
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4138,7 +6823,7 @@ contains
     real(dp), intent(out) :: array(:, :, :, :)      ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4148,7 +6833,7 @@ contains
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4172,7 +6857,7 @@ contains
     real(dp), intent(out) :: array(:, :, :, :, :)    ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4182,7 +6867,7 @@ contains
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4206,7 +6891,7 @@ contains
     real(dp), intent(out) :: array(:, :, :, :, :, :)  ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4216,7 +6901,7 @@ contains
 
     ! set rank and dims
     rank = 6
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4244,7 +6929,7 @@ contains
     character(len=*), intent(out) :: array      ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims(1), length
+    integer(HSIZE_T) :: dims(1), length
     integer(HID_T) :: dset_id, dspace_id, dtype_id
     integer :: hdferror
 
@@ -4299,7 +6984,7 @@ contains
     character(len=*), intent(out) :: array(:)   ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims_in(1), dims(1), max_dims(1), ii, length
+    integer(HSIZE_T) :: dims_in(1), dims(1), max_dims(1), ii, length
     integer(HID_T) :: dset_id, dspace_id, dtype_id
     character(len=:), dimension(:), allocatable :: buffer
     integer :: hdferror
@@ -4371,7 +7056,7 @@ contains
     character(len=*), intent(out) :: array(:, :)   ! data to be written
 
     integer :: rank
-    integer(SIZE_T) :: dims_in(2), dims(2), max_dims(2), ii, jj, length
+    integer(HSIZE_T) :: dims_in(2), dims(2), max_dims(2), ii, jj, length
     integer(HID_T) :: dset_id, dspace_id, dtype_id
     character(len=:), dimension(:, :), allocatable :: buffer
     integer :: hdferror
@@ -4449,7 +7134,7 @@ contains
     complex(dp), intent(out) :: array           ! data to be read
     real(dp) :: buffer(2)                       ! buffer to save real and imag part
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4485,7 +7170,7 @@ contains
     real(dp), allocatable, dimension(:, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4495,7 +7180,7 @@ contains
 
     ! set rank and dims
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4524,7 +7209,7 @@ contains
     real(dp), allocatable, dimension(:, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(2)
+    integer(HSIZE_T) :: dims(2)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4534,7 +7219,7 @@ contains
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4563,7 +7248,7 @@ contains
     real(dp), allocatable, dimension(:, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(3)
+    integer(HSIZE_T) :: dims(3)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4573,7 +7258,7 @@ contains
 
     ! set rank and dims
     rank = 3
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4602,7 +7287,7 @@ contains
     real(dp), allocatable, dimension(:, :, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(4)
+    integer(HSIZE_T) :: dims(4)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4612,7 +7297,7 @@ contains
 
     ! set rank and dims
     rank = 4
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4641,7 +7326,7 @@ contains
     real(dp), allocatable, dimension(:, :, :, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(5)
+    integer(HSIZE_T) :: dims(5)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4651,7 +7336,7 @@ contains
 
     ! set rank and dims
     rank = 5
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4680,7 +7365,7 @@ contains
     real(dp), allocatable, dimension(:, :, :, :, :, :, :) :: buffer ! buffer to save real and imag part
 
     integer :: rank
-    integer(SIZE_T) :: dims(6)
+    integer(HSIZE_T) :: dims(6)
     integer(HID_T) :: dset_id
     integer :: hdferror
 
@@ -4690,7 +7375,7 @@ contains
 
     ! set rank and dims
     rank = 2
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -4722,9 +7407,10 @@ contains
     character(len=*), intent(in) :: attr_name   ! name of attribute
     integer, intent(in) :: array                 ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_integer_0: "//trim(obj_name)//"/"//trim(attr_name)
@@ -4741,6 +7427,12 @@ contains
     dims = (/0/)
     call h5screate_f(H5S_SCALAR_F, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
 
     ! create attribute
     call h5acreate_f(obj_id, attr_name, H5T_NATIVE_INTEGER, aspace_id, attr_id, hdferror)
@@ -4770,9 +7462,10 @@ contains
     integer, intent(in) :: array(:)              ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_integer_1: "//trim(obj_name)//"/"//trim(attr_name)
@@ -4785,9 +7478,15 @@ contains
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
     end if
 
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
+
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
     call h5screate_simple_f(rank, dims, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
@@ -4810,6 +7509,60 @@ contains
 
   end subroutine hdf_write_attr_integer_1
 
+  subroutine hdf_write_attr_integer_1_8(loc_id, obj_name, attr_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: obj_name    ! object name attribute will be attached to (if "" use loc_id)
+    character(len=*), intent(in) :: attr_name   ! name of attribute
+    integer(HSIZE_T), intent(in) :: array(:)    ! data to write to attribute
+
+    integer :: rank
+    integer(HSIZE_T) :: dims(1)
+    integer(HID_T) :: obj_id, aspace_id, attr_id
+    integer :: hdferror
+    logical :: attr_exists
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_write_attr_integer_1_8: "//trim(obj_name)//"/"//trim(attr_name)
+    end if
+
+    ! open object
+    if (obj_name == "") then
+      obj_id = loc_id
+    else
+      call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
+
+    ! create dataspace
+    rank = 1
+    dims = shape(array, KIND=HSIZE_T)
+    call h5screate_simple_f(rank, dims, aspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
+
+    ! create attribute
+    call h5acreate_f(obj_id, attr_name, H5T_NATIVE_INTEGER, aspace_id, attr_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write dataset, the data is write as 4 bytes integer
+    call h5awrite_f(attr_id, H5T_NATIVE_INTEGER, int(array), dims, hdferror)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5aclose_f(attr_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+    call h5sclose_f(aspace_id, hdferror)
+    !write(*,'(A20,I0)') "h5sclose: ", hdferror
+    if (obj_name /= "") then
+      call h5oclose_f(obj_id, hdferror)
+    end if
+  end subroutine hdf_write_attr_integer_1_8
+
   !  \brief writes a scalar attribute
   subroutine hdf_write_attr_real_0(loc_id, obj_name, attr_name, array)
 
@@ -4819,9 +7572,10 @@ contains
     real(sp), intent(in) :: array                ! data to write to attribute
 
     !integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_real_0: "//trim(obj_name)//"/"//trim(attr_name)
@@ -4832,6 +7586,12 @@ contains
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -4867,9 +7627,10 @@ contains
     real(sp), intent(in) :: array(:)             ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_real_1: "//trim(obj_name)//"/"//trim(attr_name)
@@ -4882,9 +7643,15 @@ contains
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
     end if
 
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
+
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
     call h5screate_simple_f(rank, dims, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
@@ -4916,9 +7683,10 @@ contains
     real(dp), intent(in) :: array                ! data to write to attribute
 
     !integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_double_0: "//trim(obj_name)//"/"//trim(attr_name)
@@ -4929,6 +7697,12 @@ contains
       obj_id = loc_id
     else
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
     end if
 
     ! create dataspace
@@ -4964,9 +7738,10 @@ contains
     real(dp), intent(in) :: array(:)             ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_double_1: "//trim(obj_name)//"/"//trim(attr_name)
@@ -4979,9 +7754,15 @@ contains
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
     end if
 
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
+
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
     call h5screate_simple_f(rank, dims, aspace_id, hdferror)
     !write(*,'(A20,I0)') "h5screate_simple: ", hdferror
 
@@ -5012,9 +7793,10 @@ contains
     character(len=*), intent(in) :: attr_name   ! name of attribute
     character(len=*), intent(in) :: array        ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, type_id, aspace_id, attr_id
     integer :: hdferror
+    logical :: attr_exists
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_write_attr_string: "//trim(obj_name)//"/"//trim(attr_name)
@@ -5027,8 +7809,14 @@ contains
       call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
     end if
 
+    ! delete attribute if exists
+    call h5aexists_f(obj_id, attr_name, attr_exists, hdferror)
+    if (attr_exists) then
+      call h5adelete_f(obj_id, attr_name, hdferror)
+    end if
+
     ! create type_id and aspace_id
-    dims(1) = len(array, KIND=HID_T)
+    dims(1) = len(array, KIND=HSIZE_T)
     call h5tcopy_f(H5T_NATIVE_CHARACTER, type_id, hdferror)
     !write(*,*) 'h5tcopy_f returns', type_id
     call h5tset_size_f(type_id, dims(1), hdferror)
@@ -5067,7 +7855,7 @@ contains
     character(len=*), intent(in) :: attr_name   ! name of attribute
     integer, intent(out) :: array                ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -5108,7 +7896,7 @@ contains
     integer, intent(out) :: array(:)             ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -5125,7 +7913,7 @@ contains
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! create attribute
     call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
@@ -5152,7 +7940,7 @@ contains
     character(len=*), intent(in) :: attr_name   ! name of attribute
     real(sp), intent(out) :: array               ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -5193,7 +7981,7 @@ contains
     real(sp), intent(out) :: array(:)            ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -5210,7 +7998,7 @@ contains
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! create attribute
     call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
@@ -5237,7 +8025,7 @@ contains
     character(len=*), intent(in) :: attr_name   ! name of attribute
     real(dp), intent(out) :: array               ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -5278,7 +8066,7 @@ contains
     real(dp), intent(out) :: array(:)            ! data to write to attribute
 
     integer :: rank
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, attr_id
     integer :: hdferror
 
@@ -5295,7 +8083,7 @@ contains
 
     ! create dataspace
     rank = 1
-    dims = shape(array, KIND=HID_T)
+    dims = shape(array, KIND=HSIZE_T)
 
     ! create attribute
     call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
@@ -5322,7 +8110,7 @@ contains
     character(len=*), intent(in) :: attr_name   ! name of attribute
     character(len=*), intent(out) :: array       ! data to write to attribute
 
-    integer(SIZE_T) :: dims(1)
+    integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: obj_id, type_id, attr_id
     integer :: hdferror
 
@@ -5338,7 +8126,7 @@ contains
     end if
 
     ! create type_id
-    dims(1) = len(array, KIND=HID_T)
+    dims(1) = len(array, KIND=HSIZE_T)
     call h5tcopy_f(H5T_NATIVE_CHARACTER, type_id, hdferror)
     !write(*,*) 'h5tcopy_f returns', type_id
     call h5tset_size_f(type_id, dims(1), hdferror)

@@ -47,18 +47,40 @@ module hdf5_utils_mpi
   private :: hdf_preset_prop, hdf_close_prop
 
   !>  \brief Generic interface to write a dataset
-  !>
   !>  Supported types
   !>   - integers (scalar and 1d-6d arrays)
   !>   - doubles (scalar and 1d-6d arrays)
   !>   - reals (scalar and 1d-6d arrays)
   !>   - string (scalar and 1d-2d arrays)
+  !>   - complex double number (compound data type, "r"/"i" for real and imaginary part, scalar and 1d-6d arrays)
   !>
-  !>  \param[in] loc_id     local id in file
-  !>  \param[in] dset_name  name of dataset
+  !>  \param[in] loc_id     local id in file, e.g. file_id
+  !>  \param[in] dset_name  name of dataset, NOTE: HDF5 assumes the dataset doesn't exist before !!
   !>  \param[in] array      data array to be written
   !>  \param[in] chunks     (optional) chunk size for dataset
   !>  \param[in] filter     (optional) filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+  !>  \param[in] processor  (optional, default=-1) processor that provides the data, -1 if the data is the same on all processors.
+  !>
+  !>  if processor != -1, the following options become useless
+  !>  \param[in] axis       (optional, default=-1) dimension on which the data will be stacked, starting from 1
+  !>
+  !>  \details
+  !>    - a variable with the name "num_reacts". All processors have the same data. We only want one copy saved in the final file
+  !>          call hdf_write_dataset(file_id, "num_reacts", num_reacts)
+  !>    - a variable with the name "num_reacts_0". All processors have this variable but different shape and content.
+  !>          we only want to save the copy on processor 0 (first processor)
+  !>          call hdf_write_dataset(file_id, "num_reacts_0", num_reacts_0, processor=0)
+  !>    - a scalar variable with the name "num_particle". All processors have this variable with different values. We want to save all of them.
+  !>          call hdf_write_dataset(file_id, "num_particle", num_particle, axis=1)
+  !>       (Note: the result of this call is an array with its size equal to the number of processors will be save to the hdf5 file. If you want to add
+  !>        them up and then save the result, you need to do the calculation by yourself)
+  !>    - an array "x_loc(XSIZE, YSIZE, ZSIZE)". All processors have this variable with different values. In addition, the meaningful data is not the whole
+  !>      array but "x_loc(xstart:xend, ystart:yend, 1:num)" (xstart, xend, ystart, yend are the same across processors but num is has different values
+  !>      on each processor). To stack the variable on the third dimension, use the following call. The API will set hyperslab based on the shape of array provided
+  !>          call hdf_write_dataset(file_id, "x_loc", x_loc(xstart:xend, ystart:yend, 1:num), axis=3)
+  !>    The function will also save the number of rows contributed by each processor as an attribute.
+
+
   interface hdf_write_dataset
     module procedure hdf_write_dataset_integer_0
     module procedure hdf_write_dataset_integer_1
@@ -201,12 +223,22 @@ module hdf5_utils_mpi
   interface hdf_write_attribute
     module procedure hdf_write_attr_integer_0
     module procedure hdf_write_attr_integer_1
+    module procedure hdf_write_attr_integer_1_8  ! kind = 8 integer
     module procedure hdf_write_attr_real_0
     module procedure hdf_write_attr_real_1
     module procedure hdf_write_attr_double_0
     module procedure hdf_write_attr_double_1
     module procedure hdf_write_attr_string
   end interface hdf_write_attribute
+
+  !>  \brief Get the appropriate mpi integer type
+  !>  \param[in] int_number  an integer number
+  !>  \return    MPI_TYPE for MPI communication
+  interface hdf_get_mpi_int
+    module procedure hdf_get_mpi_int_4
+    module procedure hdf_get_mpi_int_8
+    module procedure hdf_get_mpi_int_16
+  end interface hdf_get_mpi_int
 
   !>  \brief Generic interface to read attribute
   !>
@@ -252,7 +284,7 @@ module hdf5_utils_mpi
 
   !
   ! property list for parallel API
-  integer :: mpi_comm, mpi_irank, mpi_nrank, mpi_ierr
+  integer :: mpi_comm, mpi_irank, mpi_nrank, mpi_ierr, mpi_hsize_t
   integer(HID_T) :: file_plist_id   !< parallel file access property
   integer(HID_T) :: dplist_collective, dplist_independent !< dataset access property
 
@@ -390,6 +422,7 @@ contains
 
     integer :: hdferror
     character(len=16) :: status2, action2
+    integer(HSIZE_T) :: temp
 
     if (hdf_print_messages) then
       write (*, '(A)') "->hdf_open_file: "//trim(filename)
@@ -409,6 +442,7 @@ contains
     mpi_comm = MPI_COMM_WORLD
     call MPI_COMM_SIZE(MPI_COMM_WORLD, mpi_nrank, mpi_ierr)
     call MPI_COMM_RANK(MPI_COMM_WORLD, mpi_irank, mpi_ierr)
+    mpi_hsize_t = hdf_get_mpi_int(temp)
 
     ! set up file access property list with parallel I/O access
     call h5pcreate_f(H5P_FILE_ACCESS_F, file_plist_id, hdferror)
@@ -482,10 +516,10 @@ contains
   subroutine hdf_preset_prop()
     implicit none
     integer :: ii
-    integer(SIZE_T) ::offset
-    INTEGER(SIZE_T)     ::   type_sizei  ! Size of the integer datatype
-    INTEGER(SIZE_T)     ::   type_sized  ! Size of the double precision datatype
-    INTEGER(SIZE_T)     ::   type_sizer  ! Size of the real datatype
+    integer(HSIZE_T) ::offset
+    INTEGER(HSIZE_T)     ::   type_sizei  ! Size of the integer datatype
+    INTEGER(HSIZE_T)     ::   type_sized  ! Size of the double precision datatype
+    INTEGER(HSIZE_T)     ::   type_sizer  ! Size of the real datatype
     integer :: hdferror
 
     integer(HID_T) :: temp_int(3)
@@ -697,7 +731,7 @@ contains
     character(len=*), intent(in) :: dset_type   !< type of dataset (integer or double)
 
     integer :: rank
-    integer(SIZE_T) :: dims(8)
+    integer(HSIZE_T) :: dims(8)
     integer(HID_T) :: dset_id, dspace_id
     integer :: hdferror
 
@@ -707,7 +741,7 @@ contains
 
     ! set rank and dims
     rank = size(dset_dims, 1)
-    dims(1:rank) = int(dset_dims, SIZE_T)
+    dims(1:rank) = int(dset_dims, HSIZE_T)
 
     ! create dataspace
     call h5screate_simple_f(rank, dims, dspace_id, hdferror)
@@ -1165,8 +1199,8 @@ contains
 
     integer(HID_T), intent(inout) :: plist_id
     integer, intent(in) :: rank
-    integer(SIZE_T), intent(in) :: dims(:)
-    integer(SIZE_T), intent(inout) :: cdims(:)
+    integer(HSIZE_T), intent(in) :: dims(:)
+    integer(HSIZE_T), intent(inout) :: cdims(:)
     character(len=*), intent(in) :: filter
 
     integer :: hdferror
@@ -1210,3 +1244,27 @@ contains
 
   end subroutine hdf_set_property_list
 
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_get_mpi_int-----------------------------------------
+  !!----------------------------------------------------------------------------------------
+
+  function hdf_get_mpi_int_4(int_number) result(r)
+    implicit none
+    integer(kind=4), INTENT(IN) :: int_number
+    integer :: r
+    r = MPI_INTEGER4
+  end function hdf_get_mpi_int_4
+
+  function hdf_get_mpi_int_8(int_number) result(r)
+    implicit none
+    integer(kind=8), INTENT(IN) :: int_number
+    integer :: r
+    r = MPI_INTEGER8
+  end function hdf_get_mpi_int_8
+
+  function hdf_get_mpi_int_16(int_number) result(r)
+    implicit none
+    integer(kind=16), INTENT(IN) :: int_number
+    integer :: r
+    r = MPI_INTEGER16
+  end function hdf_get_mpi_int_16
