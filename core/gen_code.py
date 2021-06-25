@@ -104,7 +104,7 @@ def gen_write_dataset(ftype_name, rank):
       length_calculation = 'length=len(array({:s}))'.format('1,'*(rank-1)+'1')
       temp_n = 0
       for i in range(1, rank+1):
-        cps.append(temp_n*' ' + f'do i_{i} = 1, dimsm({i})')
+        cps.append(temp_n*' ' + f'do i_{i} = 1, int(dimsm({i}))')
         temp_n += 2
       index_string = ','.join([f'i_{i}' for i in range(1, rank+1)])
       cps.append(' '*(temp_n) + f'buffer({index_string}) = array({index_string})')

@@ -237,7 +237,7 @@ module hdf5_utils_mpi
   interface hdf_get_mpi_int
     module procedure hdf_get_mpi_int_4
     module procedure hdf_get_mpi_int_8
-    module procedure hdf_get_mpi_int_16
+    ! module procedure hdf_get_mpi_int_16
   end interface hdf_get_mpi_int
 
   !>  \brief Generic interface to read attribute
@@ -1333,12 +1333,12 @@ contains
     r = MPI_INTEGER8
   end function hdf_get_mpi_int_8
 
-  function hdf_get_mpi_int_16(int_number) result(r)
-    implicit none
-    integer(kind=16), INTENT(IN) :: int_number
-    integer :: r
-    r = MPI_INTEGER16
-  end function hdf_get_mpi_int_16
+  ! function hdf_get_mpi_int_16(int_number) result(r)
+  !   implicit none
+  !   integer(kind=16), INTENT(IN) :: int_number
+  !   integer :: r
+  !   r = MPI_INTEGER16
+  ! end function hdf_get_mpi_int_16
   !!----------------------------------------------------------------------------------------
   !!--------------------------------hdf_write_dataset_integer--------------------------------
   !!----------------------------------------------------------------------------------------
@@ -1471,7 +1471,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -1630,7 +1630,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -1789,7 +1789,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -1948,7 +1948,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -2107,7 +2107,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -2266,7 +2266,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -2544,7 +2544,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -2703,7 +2703,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -2862,7 +2862,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -3021,7 +3021,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -3180,7 +3180,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -3339,7 +3339,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -3617,7 +3617,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -3776,7 +3776,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -3935,7 +3935,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -4094,7 +4094,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -4253,7 +4253,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -4412,7 +4412,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -4726,7 +4726,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -4774,7 +4774,7 @@ contains
       call MPI_Allreduce(length, length_glob, 1, mpi_hsize_t, MPI_MAX, mpi_comm, mpi_ierr)
       if (length .ne. length_glob) then
         allocate(character(len=length_glob)::buffer(dimsm(1)))
-        do i_1 = 1, dimsm(1)
+        do i_1 = 1, int(dimsm(1))
           buffer(i_1) = array(i_1)
         end do
       end if
@@ -4924,7 +4924,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -4972,8 +4972,8 @@ contains
       call MPI_Allreduce(length, length_glob, 1, mpi_hsize_t, MPI_MAX, mpi_comm, mpi_ierr)
       if (length .ne. length_glob) then
         allocate(character(len=length_glob)::buffer(dimsm(1),dimsm(2)))
-        do i_1 = 1, dimsm(1)
-          do i_2 = 1, dimsm(2)
+        do i_1 = 1, int(dimsm(1))
+          do i_2 = 1, int(dimsm(2))
             buffer(i_1,i_2) = array(i_1,i_2)
           end do
         end do
@@ -5255,7 +5255,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -5426,7 +5426,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -5597,7 +5597,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -5768,7 +5768,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -5939,7 +5939,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6110,7 +6110,7 @@ contains
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6453,8 +6453,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_integer_1 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -6588,8 +6588,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_integer_2 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -6723,8 +6723,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_integer_3 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -6858,8 +6858,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_integer_4 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -6993,8 +6993,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_integer_5 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -7128,8 +7128,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_integer_6 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -7353,8 +7353,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_real_1 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -7488,8 +7488,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_real_2 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -7623,8 +7623,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_real_3 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -7758,8 +7758,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_real_4 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -7893,8 +7893,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_real_5 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8028,8 +8028,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_real_6 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8253,8 +8253,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_double_1 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8388,8 +8388,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_double_2 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8523,8 +8523,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_double_3 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8658,8 +8658,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_double_4 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8793,8 +8793,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_double_5 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -8928,8 +8928,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_double_6 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9161,8 +9161,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_1 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9306,8 +9306,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_2 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9451,8 +9451,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_3 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9596,8 +9596,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_4 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9741,8 +9741,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_5 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9886,8 +9886,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_6 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -9963,7 +9963,7 @@ contains
     end if
 
     ! get file_space dimension
-    ! call hdf_get_dims(loc_id, dset_name, dimsf)
+    call hdf_get_dims(loc_id, dset_name, dimsf)
 
     ! get stacked axis
     axis_write = -1
@@ -9981,6 +9981,12 @@ contains
       end if
     end if
     dimsm = (/1/)
+
+    if (is_parallel .and. dimsf(1) .ne. mpi_nrank) then
+      write(*, '(A)') "hdf_read_dataset_character_0("//trim(dset_name)// &
+                        "): inconsistent number of elements v.s. number of processors"
+      call MPI_Abort(mpi_comm, mpi_ierr)
+    end if
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -10125,8 +10131,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_character_1 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -10165,7 +10171,7 @@ contains
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
-      do ii = 1, dimsm(1)
+      do ii = 1, int(dimsm(1))
         array(ii) = buffer(ii)
       end do
       deallocate(buffer)
@@ -10280,8 +10286,8 @@ contains
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_character_2 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -10320,8 +10326,8 @@ contains
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
-      do ii = 1, dimsm(1)
-        do jj = 1, dimsm(2)
+      do ii = 1, int(dimsm(1))
+        do jj = 1, int(dimsm(2))
           array(ii,jj) = buffer(ii,jj)
         end do
       end do

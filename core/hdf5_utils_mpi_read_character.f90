@@ -26,7 +26,7 @@
     end if
 
     ! get file_space dimension
-    ! call hdf_get_dims(loc_id, dset_name, dimsf)
+    call hdf_get_dims(loc_id, dset_name, dimsf)
 
     ! get stacked axis
     axis_write = -1
@@ -44,6 +44,12 @@
       end if
     end if
     dimsm = (/1/)
+
+    if (is_parallel .and. dimsf(1) .ne. mpi_nrank) then
+      write(*, '(A)') "hdf_read_dataset_character_0("//trim(dset_name)// &
+                        "): inconsistent number of elements v.s. number of processors"
+      call MPI_Abort(mpi_comm, mpi_ierr)
+    end if
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
@@ -188,8 +194,8 @@
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_character_1 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -228,7 +234,7 @@
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
-      do ii = 1, dimsm(1)
+      do ii = 1, int(dimsm(1))
         array(ii) = buffer(ii)
       end do
       deallocate(buffer)
@@ -343,8 +349,8 @@
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_character_2 ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj
@@ -383,8 +389,8 @@
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
-      do ii = 1, dimsm(1)
-        do jj = 1, dimsm(2)
+      do ii = 1, int(dimsm(1))
+        do jj = 1, int(dimsm(2))
           array(ii,jj) = buffer(ii,jj)
         end do
       end do

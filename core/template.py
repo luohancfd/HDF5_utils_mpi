@@ -116,7 +116,7 @@ write_array_template = '''  subroutine hdf_write_dataset_{ftype_name}_{rank}(loc
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension({rank}) :: dimsf, dimsm, offset
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
-    character(len=32) :: filter_case
+    ! character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -439,8 +439,8 @@ configure_offset_array = '''    if (present(offset)) then
       end do
     else
       do ii = 1, rank
-        jj = dimsf(ii)
-        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        jj = int(dimsf(ii))
+        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
         if (dimsm(ii) .ne. jj) then
           write(*, '(A, I2, I8)') "hdf_read_dataset_{ftype_name}_{rank} ("//trim(dset_name)// &
                           "): array size is wrong", dimsm(ii), jj

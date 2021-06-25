@@ -1,23 +1,18 @@
 PROGRAM DATASET
 
-  USE HDF5 ! This module contains all necessary modules
+  ! Run this program with 4 cores
+
+
   use hdf5_utils_mpi
 
   IMPLICIT NONE
 
   INCLUDE 'mpif.h'
-  CHARACTER(LEN=10), PARAMETER :: filename = "sds.h5"  ! File name
-  CHARACTER(LEN=8), PARAMETER :: dsetname = "IntArray" ! Dataset name
 
-  INTEGER(HID_T) :: file_id       ! File identifier
-  INTEGER(HID_T) :: dset_id       ! Dataset identifier
-  INTEGER(HID_T) :: filespace     ! Dataspace identifier in file
-  INTEGER(HID_T) :: plist_id      ! Property list identifier
+  INTEGER(kind=8) :: file_id       ! File identifier
 
-  INTEGER(HSIZE_T), DIMENSION(2) :: dimsf = (/5, 8/) ! Dataset dimensions.
-!     INTEGER, DIMENSION(7) :: dimsfi = (/5,8,0,0,0,0,0/)
-!     INTEGER(HSIZE_T), DIMENSION(2) :: dimsfi = (/5,8/)
-  INTEGER(HSIZE_T), DIMENSION(2) :: dimsfi
+  INTEGER, DIMENSION(2) :: dimsf = (/5, 8/) ! Dataset dimensions.
+  INTEGER, DIMENSION(2) :: dimsfi
 
   INTEGER, ALLOCATABLE :: data0(:, :)   ! Data to write
   real(kind=8), ALLOCATABLE :: data1(:)   ! Data to write
@@ -32,9 +27,6 @@ PROGRAM DATASET
 
   integer, allocatable :: dims(:), offset(:)
 
-  INTEGER :: rank = 2 ! Dataset rank
-
-  INTEGER :: error, error_n  ! Error flags
   INTEGER :: i, j, ii, jj
   !
   ! MPI definitions and calls.
@@ -48,6 +40,14 @@ PROGRAM DATASET
   CALL MPI_INIT(mpierror)
   CALL MPI_COMM_SIZE(comm, mpi_size, mpierror)
   CALL MPI_COMM_RANK(comm, mpi_rank, mpierror)
+
+  if (mpi_size .ne. 4) then
+    if (mpi_rank == 0) then
+      write(*,*) "Run this program with 4 cores"
+      call MPI_Abort(comm, mpierror)
+    end if
+    call MPI_Barrier(comm, mpierror)
+  end if
 
   !
   ! Initialize data buffer with trivial data.
@@ -274,7 +274,10 @@ PROGRAM DATASET
   end if
 
   ! data8
-  data8 = ''
+  do i = 1, mpi_rank+1
+    write(data8(i), *)
+  end do
+
   call hdf_read_dataset(file_id, "data8", data8)
   if (mpi_rank > 0) then
     call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
@@ -288,31 +291,9 @@ PROGRAM DATASET
     call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
   end if
 
-  ! ! data2 = 0
-  ! ! call hdf_read_dataset(file_id, "data2", data2)
-
-  ! deallocate(data2)
-  ! ii = 0
-  ! do jj = 1, mpi_size
-  !      ii = ii + (jj-1+2)*2
-  ! end do
-  ! ii = ii / mpi_size
-  ! allocate(data2(ii), offset(mpi_size))
-  ! offset(1) = 0
-  ! do jj = 2, mpi_size
-  !      offset(jj) = offset(jj-1) + ii
-  ! end do
-  ! call hdf_read_dataset(file_id, "data2", data2, offset=offset)
-
-  ! write(*,*) "Rank=", mpi_rank, "data2 = ", data2
-
-  ! call hdf_set_dims(file_id, 'data3', dims)
-
-  ! call hdf_read_dataset(file_id, "data3", data3)
-
   call hdf_close_file(file_id)
 
-  DEALLOCATE (data0, data1, data2, data3, data5)
+  DEALLOCATE (data0, data1, data2, data3, data5, data8)
 
   CALL MPI_FINALIZE(mpierror)
 

@@ -1,14 +1,13 @@
 
 
-FC = mpiifort
+FC = mpif90.openmpi
+
 # GIT tag usage
 # >>> git tag -a v1.4 -m "my version 1.4"
-HDF5_FFLAG = -I${HDF5INCLUDE}
-HDF5_LDFLAG = -L${HDF5DIR} -lhdf5_fortran
 
 # add hdf5 support
-LDFLAGS = $(HDF5_LDFLAG) #`pkg-config hdf5 --libs` -lhdf5_fortran
-FFLAGS = $(HDF5_FFLAG) #`pkg-config hdf5 --cflags`
+LDFLAGS = `pkg-config hdf5 --libs` -lhdf5_fortran
+FFLAGS = `pkg-config hdf5 --cflags`
 
 ifeq ($(FC),gfortran)
 

@@ -237,7 +237,7 @@ module hdf5_utils_mpi
   interface hdf_get_mpi_int
     module procedure hdf_get_mpi_int_4
     module procedure hdf_get_mpi_int_8
-    module procedure hdf_get_mpi_int_16
+    ! module procedure hdf_get_mpi_int_16
   end interface hdf_get_mpi_int
 
   !>  \brief Generic interface to read attribute
@@ -1333,9 +1333,9 @@ contains
     r = MPI_INTEGER8
   end function hdf_get_mpi_int_8
 
-  function hdf_get_mpi_int_16(int_number) result(r)
-    implicit none
-    integer(kind=16), INTENT(IN) :: int_number
-    integer :: r
-    r = MPI_INTEGER16
-  end function hdf_get_mpi_int_16
+  ! function hdf_get_mpi_int_16(int_number) result(r)
+  !   implicit none
+  !   integer(kind=16), INTENT(IN) :: int_number
+  !   integer :: r
+  !   r = MPI_INTEGER16
+  ! end function hdf_get_mpi_int_16
