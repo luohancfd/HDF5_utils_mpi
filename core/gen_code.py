@@ -13,7 +13,7 @@ def concatenate_files(src_file, dest_file):
           shutil.copyfileobj(fs, fd)
     print("File {:s} is ready".format(dest_file), flush=True)
 
-
+#%%
 def gen_write_dataset(ftype_name, rank):
   ftype = ftype_name
   h5type = ''
@@ -145,17 +145,90 @@ def gen_write_dataset(ftype_name, rank):
     ]
     config['additional_close'] = '\n'.join([' '*nspace + i for i in config['additional_close']])+'\n'
 
-
-
   if rank == 0:
     return write_single_value_template.format(**config)
   else:
     return write_array_template.format(**config)
 
+#%%
+def gen_read_dataset(ftype_name, rank, nspace=4):
+  ftype = ftype_name
+  h5type = ''
+  if ftype_name == 'integer':
+    h5type = 'H5T_NATIVE_INTEGER'
+  elif ftype_name == 'real':
+    ftype = 'real(sp)'
+    h5type = 'H5T_NATIVE_REAL'
+  elif ftype_name == 'double':
+    ftype = 'real(dp)'
+    h5type = 'H5T_NATIVE_DOUBLE'
+  elif ftype_name == 'complex_double':
+    ftype = 'complex(dp)'
+    h5type = 'complexd_type_id'
+  elif ftype_name == 'character':
+    h5type = 'dtype_id'
+    ftype = 'character(len=*)'
+  else:
+    raise ValueError(f'Unkndown ftype {ftype_name}')
+
+  array_comma = ''
+  buffer_indexing = ''
+  if rank > 0:
+    array_comma = ':,' * (rank - 1) + ':'
+    buffer_indexing = array_comma + ','
+
+  buffer_size = ', '.join([f'dims({i})' for i in range(1, rank+1)])
+
+  if rank == 0:
+    declaration = f'{ftype}, intent(out) :: array'
+  else:
+    declaration = f'{ftype}, intent(out) :: array({array_comma})'
+  declaration = ' '*nspace + declaration
+  declaration = '{:48s}! data to be read'.format(declaration)
+
+  additional_declaration = ''
+  if ftype_name == 'complex_double':
+    if rank == 0:
+      additional_declaration = ' '*nspace + 'real(dp) :: buffer(2)                       ! buffer to save real and imag part'
+    else:
+      additional_declaration = ' '*nspace + f'real(dp), allocatable, dimension({array_comma},:) :: buffer ! buffer to save real and imag part'
+
+  set_dims = ' '*nspace + 'dims = shape(array, KIND=HSIZE_T)'
+  dims_declaration = ' '*nspace + f'integer(HSIZE_T) :: dims({rank})'
+  if rank == 0:
+    set_dims = ' '*nspace + 'dims = (/0/)'
+    dims_declaration = ' '*nspace + f'integer(HSIZE_T) :: dims(1)'
+
+  if ftype_name == 'complex_double':
+    read_string = read_complex_dataset_template.format(buffer_indexing=buffer_indexing)
+    if rank != 0:
+      read_string = read_string.split('\n')
+      read_string = [f'    allocate (buffer({buffer_size}, 2))'] + read_string + [
+        '    deallocate (buffer)'
+      ]
+      read_string = '\n'.join(read_string)
+  else:
+    read_string = read_regular_dataset_template.format(h5type=h5type)
+
+  config = {
+    'ftype_name': ftype_name,
+    'declaration': declaration,
+    'additional_declaration': additional_declaration,
+    'rank': rank,
+    'set_dims': set_dims,
+    'read_string': read_string,
+    'dims_declaration': dims_declaration,
+  }
+
+  return read_array_template.format(**config)
+
+
 # %%
 
 if __name__ == '__main__':
   with open('new.f90', 'w') as f:
+
+    # ====================== write dataset ========================================
     for ftype_name in ['integer', 'real', 'double', 'character', 'complex_double']:
       f.write(f'''
   !!----------------------------------------------------------------------------------------
@@ -174,9 +247,27 @@ if __name__ == '__main__':
           f.write(f'''  !  \\brief write a {rank} - dimension array to a hdf5 file\n''')
         f.write(gen_write_dataset(ftype_name, rank))
         f.write('\n')
+    # ====================== read dataset ========================================
+    for ftype_name in ['integer', 'real', 'double', 'complex_double']:
+      max_dim = 6
+      f.write(f'''
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_read_dataset_{ftype_name}--------------------------------
+  !!----------------------------------------------------------------------------------------
 
-  concatenate_files(['hdf5_utils_mpi_head.f90', 'new.f90', 'hdf5_utils_mpi_end.f90'], '../hdf5_utils_mpi.f90')
+''')
+      for rank in range(max_dim+1):
+        if rank == 0:
+          f.write('''  !  \\brief read a scalar from a hdf5 file\n''')
+        else:
+          f.write(f'''  !  \\brief read a {rank} - dimension array from a hdf5 file\n''')
+        f.write(gen_read_dataset(ftype_name, rank))
+        f.write('\n')
+
+  concatenate_files([
+    'hdf5_utils_mpi_head.f90',
+    'new.f90',
+    'hdf5_utils_mpi_read_character.f90',
+    'hdf5_utils_mpi_end.f90'], '../hdf5_utils_mpi.f90')
   os.remove('new.f90')
-
-
 # %%

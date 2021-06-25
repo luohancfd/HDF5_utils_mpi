@@ -37,7 +37,7 @@ module hdf5_utils_mpi
 
   public :: hdf_open_file, hdf_close_file
   public :: hdf_create_group, hdf_open_group, hdf_close_group
-  public :: hdf_exists, hdf_get_rank, hdf_get_dims
+  public :: hdf_exists, hdf_get_rank, hdf_get_dims, hdf_set_dims
   public :: hdf_write_dataset, hdf_read_dataset
   public :: hdf_write_attribute, hdf_read_attribute
   public :: hdf_create_dataset
@@ -255,12 +255,18 @@ module hdf5_utils_mpi
   interface hdf_read_attribute
     module procedure hdf_read_attr_integer_0
     module procedure hdf_read_attr_integer_1
+    module procedure hdf_read_attr_integer_1_8
     module procedure hdf_read_attr_real_0
     module procedure hdf_read_attr_real_1
     module procedure hdf_read_attr_double_0
     module procedure hdf_read_attr_double_1
     module procedure hdf_read_attr_string
   end interface hdf_read_attribute
+
+  interface hdf_get_dims
+    module procedure hdf_get_dims_4
+    module procedure hdf_get_dims_8
+  end interface hdf_get_dims
 
   ! precision for this file
   integer, parameter :: sp = kind(1.0)     ! single precision
@@ -287,7 +293,7 @@ module hdf5_utils_mpi
   integer :: mpi_comm, mpi_irank, mpi_nrank, mpi_ierr, mpi_hsize_t
   integer(HID_T) :: file_plist_id   !< parallel file access property
   integer(HID_T) :: dplist_collective, dplist_independent !< dataset access property
-
+  integer :: mpi_nrank_old
 
 contains
 
@@ -475,8 +481,11 @@ contains
 
     call hdf_preset_prop()
 
+    mpi_nrank_old = -1
     if ((status2 .ne. 'OLD') .or. (action2 == 'WRITE') .or. (action2 == 'READWRITE')) then
       call hdf_preset_file_attribute(file_id)
+    else
+      call hdf_read_attribute(file_id, "", 'mpi_nrank', mpi_nrank_old)
     end if
 
     !write(*,'(A20,I0)') "h5fcreate: ", hdferror
@@ -682,7 +691,7 @@ contains
   end subroutine hdf_get_rank
 
   !>  \brief get the dimensions of a dataset
-  subroutine hdf_get_dims(loc_id, dset_name, dims)
+  subroutine hdf_get_dims_4(loc_id, dset_name, dims)
 
     integer(HID_T), intent(in) :: loc_id        !< location id
     character(len=*), intent(in) :: dset_name   !< name of dataset
@@ -694,7 +703,7 @@ contains
     integer :: hdferror
 
     if (hdf_print_messages) then
-      write (*, '(A)') "->hdf_get_dims"
+      write (*, '(A)') "->hdf_get_dims_4"
     end if
 
     ! open dataset
@@ -714,7 +723,69 @@ contains
     call h5sclose_f(dspace_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
-  end subroutine hdf_get_dims
+  end subroutine hdf_get_dims_4
+
+  !>  \brief get the dimensions of a dataset
+  subroutine hdf_get_dims_8(loc_id, dset_name, dims)
+
+    integer(HID_T), intent(in) :: loc_id        !< location id
+    character(len=*), intent(in) :: dset_name   !< name of dataset
+    integer(HSIZE_T), intent(out) :: dims(:)             !< dimensions of the dataset
+
+    integer(HID_T) :: dset_id, dspace_id
+    integer :: rank
+    integer(HSIZE_T) :: dset_dims(6), max_dims(6)
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "->hdf_get_dims_8"
+    end if
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! get dataspace
+    call h5dget_space_f(dset_id, dspace_id, hdferror)
+
+    ! get rank (ndims)
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, hdferror)
+
+    ! get dims
+    call h5sget_simple_extent_dims_f(dspace_id, dset_dims(1:rank), max_dims(1:rank), hdferror)
+    dims(1:rank) = dset_dims(1:rank)
+
+    ! close id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_get_dims_8
+
+  !>  \brief set the dimensions of a dataset
+  subroutine hdf_set_dims(loc_id, dset_name, dims)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    integer, allocatable :: dims(:)
+
+    integer :: rank, hdferror
+    integer(HID_T) :: dset_id, dspace_id
+    integer(HSIZE_T) :: dims_data(6), max_dims(6)
+
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    call h5dget_space_f(dset_id, dspace_id, hdferror)
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, hdferror)
+
+    if (allocated(dims)) then
+      deallocate(dims)
+    end if
+    allocate(dims(rank))
+
+    call h5sget_simple_extent_dims_f(dspace_id, dims_data(1:rank), max_dims(1:rank), hdferror)
+    dims = int(dims_data(1:rank))
+    call h5sclose_f(dspace_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_set_dims
 
   !     - hdf_get_kind   (H5Dget_type)
 
@@ -1399,7 +1470,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -1558,7 +1629,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -1717,7 +1788,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -1876,7 +1947,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -2035,7 +2106,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -2194,7 +2265,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -2472,7 +2543,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -2631,7 +2702,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -2790,7 +2861,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -2949,7 +3020,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -3108,7 +3179,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -3267,7 +3338,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -3545,7 +3616,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -3704,7 +3775,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -3863,7 +3934,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -4022,7 +4093,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -4181,7 +4252,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -4340,7 +4411,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -4654,7 +4725,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -4852,7 +4923,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -5183,7 +5254,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(1) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -5354,7 +5425,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(2) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -5525,7 +5596,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(3) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -5696,7 +5767,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(4) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -5867,7 +5938,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(5) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -6038,7 +6109,7 @@ contains
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension(6) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -6197,17 +6268,18 @@ contains
   end subroutine hdf_write_dataset_complex_double_6
 
 
-  !!---------------------------------------------------------------------------------------
+  !!----------------------------------------------------------------------------------------
   !!--------------------------------hdf_read_dataset_integer--------------------------------
-  !!---------------------------------------------------------------------------------------
+  !!----------------------------------------------------------------------------------------
 
-  !  \brief reads a scalar from an hdf5 file
+  !  \brief read a scalar from a hdf5 file
   subroutine hdf_read_dataset_integer_0(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array                ! data to be written
+    integer, intent(out) :: array               ! data to be read
 
+    integer :: rank
     integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
@@ -6217,62 +6289,169 @@ contains
     end if
 
     ! set rank and dims
+    rank = 0
     dims = (/0/)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_integer_0
 
-  !  \brief reads a 1d array from an hdf5 file
-  subroutine hdf_read_dataset_integer_1(loc_id, dset_name, array)
+  !  \brief read a 1 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_integer_1(loc_id, dset_name, array, offset)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array(:)            ! data to be written
+    integer, intent(out) :: array(:)            ! data to be read
+    integer, optional, intent(in)  :: offset(:)
 
     integer :: rank
-    integer(HSIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
+    integer(HSIZE_T), dimension(1) :: dimsf, dimsm
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
+    integer :: processor_write, axis_write
+
+    integer(HSIZE_T) :: offset_local(1)
+    integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
+    integer :: hdferror, ii, jj
+    logical :: is_parallel
 
     if (hdf_print_messages) then
       write (*, '(A)') "--->hdf_read_dataset_integer_1: "//trim(dset_name)
     end if
 
-    ! set rank and dims
+    ! get file_space dimension
+    call hdf_get_dims(loc_id, dset_name, dimsf)
+
+    ! get stacked axis
+    axis_write = -1
+    is_parallel = .false.
+    call hdf_read_attribute(loc_id, dset_name, 'processor', processor_write)
+    if (processor_write .eq. -1) then
+      call hdf_read_attribute(loc_id, dset_name, 'axis_write', axis_write)
+      if (axis_write .ne. -1) then
+        is_parallel = .true.
+      end if
+    end if
+
+    ! allocate offset array
+    if (is_parallel) then
+      allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
+    end if
+
+    ! syntax check of offset and set offset_glob / count_glob
+    if (present(offset)) then
+      if (.not. is_parallel) then
+        write(*,'(A)') "hdf_read_dataset_integer_1("//trim(dset_name)//&
+                       "): usless offset"
+        call MPI_Abort(mpi_comm, mpi_ierr)
+      end if
+
+      if (size(offset) .ne. mpi_nrank) then
+        write(*,'(A)') "hdf_read_dataset_integer_1("//trim(dset_name)//&
+                       "): size of offset different than number of cores"
+        call MPI_Abort(mpi_comm, mpi_ierr)
+      end if
+
+      if (offset(1) .ne. 0) then
+        write(*, '(A)') "hdf_read_dataset_integer_1("//trim(dset_name)//&
+                        "): offset(1) needs to be 0"
+        call MPI_Abort(mpi_comm, mpi_ierr)
+      end if
+
+      do ii = 2, mpi_nrank
+        if (offset(ii) < offset(ii-1) .or. offset(ii) > dimsf(axis_write)) then
+          write(*,'(A)') "hdf_read_dataset_integer_1("//trim(dset_name)//&
+                    "): illegal offset value"
+          call MPI_Abort(mpi_comm, mpi_ierr)
+        end if
+      end do
+
+      offset_glob = int(offset, kind=HSIZE_T)
+      do ii = 1, mpi_nrank-1
+        count_glob(ii) = offset_glob(ii+1) - offset_glob(ii)
+      end do
+      count_glob(mpi_nrank) = dimsf(axis_write) - offset_glob(mpi_nrank)
+    else if (is_parallel) then
+      if (mpi_nrank .ne. mpi_nrank_old) then
+        write(*, '(A)') "hdf_read_dataset_integer_1 ("//trim(dset_name)// &
+                        "): different number of processors, offset needs to be explicitly specified"
+        call MPI_Abort(mpi_comm, mpi_ierr)
+      else
+        call hdf_read_attribute(loc_id, dset_name, 'count',  count_glob)
+        call hdf_read_attribute(loc_id, dset_name, 'offset', offset_glob)
+      end if
+    end if
+
+
+    ! set rank and dimsm
     rank = 1
-    dims = shape(array, KIND=HSIZE_T)
+    dimsm = shape(array, KIND=HSIZE_T)
+    if (.not. is_parallel) then
+      do ii = 1, rank
+        if (dimsm(ii) .ne. dimsf(ii)) then
+          write(*, '(A)') "hdf_read_dataset_integer_1 ("//trim(dset_name)// &
+                          "): array size is wrong"
+          call MPI_Abort(mpi_comm, mpi_ierr)
+        end if
+      end do
+    else
+      do ii = 1, rank
+        jj = dimsf(ii)
+        if (ii == axis_write) jj = count_glob(mpi_irank+1)
+        if (dimsm(ii) .ne. jj) then
+          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_1 ("//trim(dset_name)// &
+                          "): array size is wrong", dimsm(ii), jj
+          call MPI_Abort(mpi_comm, mpi_ierr)
+        end if
+      end do
+    end if
+
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
-    call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+    ! select hyperslab
+    ! mem_space_id = H5S_ALL_F
+    if (.not. is_parallel) then
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
+    else
+      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      offset_local = 0
+      offset_local(axis_write) = offset_glob(mpi_irank+1)
+      write(*,*) "Rank = ", mpi_irank, " dimsm=", dimsm, " offset=", offset_local
+      call h5dget_space_f(dset_id, file_space_id, hdferror)
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror,&
+                     mem_space_id=mem_space_id,                 &
+                     file_space_id=file_space_id, &
+                     xfer_prp=dplist_collective)
+    end if
+
+    ! read dataset
+
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+
+    if (is_parallel) then
+      deallocate(offset_glob, count_glob)
+    end if
 
   end subroutine hdf_read_dataset_integer_1
 
-  !  \brief reads a 2d array from an hdf5 file
+
+  !  \brief read a 2 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_integer_2(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array(:, :)           ! data to be written
+    integer, intent(out) :: array(:,:)          ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(2)
@@ -6289,24 +6468,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_integer_2
 
-  !  \brief reads a 3d array from an hdf5 file
+  !  \brief read a 3 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_integer_3(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array(:, :, :)         ! data to be written
+    integer, intent(out) :: array(:,:,:)        ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(3)
@@ -6323,24 +6499,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_integer_3
 
-  !  \brief reads a 4d array from an hdf5 file
+  !  \brief read a 4 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_integer_4(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array(:, :, :, :)       ! data to be written
+    integer, intent(out) :: array(:,:,:,:)      ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(4)
@@ -6357,24 +6530,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_integer_4
 
-  !  \brief reads a 5d array from an hdf5 file
+  !  \brief read a 5 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_integer_5(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array(:, :, :, :, :)     ! data to be written
+    integer, intent(out) :: array(:,:,:,:,:)    ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(5)
@@ -6391,24 +6561,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_integer_5
 
-  !  \brief reads a 6d array from an hdf5 file
+  !  \brief read a 6 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_integer_6(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    integer, intent(out) :: array(:, :, :, :, :, :)   ! data to be written
+    integer, intent(out) :: array(:,:,:,:,:,:)  ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(6)
@@ -6425,29 +6592,28 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_integer_6
 
-  !!---------------------------------------------------------------------------------------
-  !!--------------------------------hdf_read_dataset_real--------------------------------
-  !!---------------------------------------------------------------------------------------
 
-  !  \brief reads a scalar from an hdf5 file
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_read_dataset_real--------------------------------
+  !!----------------------------------------------------------------------------------------
+
+  !  \brief read a scalar from a hdf5 file
   subroutine hdf_read_dataset_real_0(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array              ! data to be written
+    real(sp), intent(out) :: array              ! data to be read
 
+    integer :: rank
     integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
@@ -6457,28 +6623,26 @@ contains
     end if
 
     ! set rank and dims
+    rank = 0
     dims = (/0/)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_0
 
-  !  \brief reads a 1d array from an hdf5 file
+  !  \brief read a 1 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_real_1(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array(:)            ! data to be written
+    real(sp), intent(out) :: array(:)           ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(1)
@@ -6495,24 +6659,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_1
 
-  !  \brief reads a 2d array from an hdf5 file
+  !  \brief read a 2 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_real_2(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array(:, :)          ! data to be written
+    real(sp), intent(out) :: array(:,:)         ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(2)
@@ -6529,24 +6690,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_2
 
-  !  \brief reads a 3d array from an hdf5 file
+  !  \brief read a 3 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_real_3(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array(:, :, :)        ! data to be written
+    real(sp), intent(out) :: array(:,:,:)       ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(3)
@@ -6563,24 +6721,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_3
 
-  !  \brief reads a 4d array from an hdf5 file
+  !  \brief read a 4 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_real_4(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array(:, :, :, :)      ! data to be written
+    real(sp), intent(out) :: array(:,:,:,:)     ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(4)
@@ -6597,24 +6752,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_4
 
-  !  \brief reads a 5d array from an hdf5 file
+  !  \brief read a 5 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_real_5(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array(:, :, :, :, :)    ! data to be written
+    real(sp), intent(out) :: array(:,:,:,:,:)   ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(5)
@@ -6631,24 +6783,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_5
 
-  !  \brief reads a 6d array from an hdf5 file
+  !  \brief read a 6 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_real_6(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(sp), intent(out) :: array(:, :, :, :, :, :)  ! data to be written
+    real(sp), intent(out) :: array(:,:,:,:,:,:) ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(6)
@@ -6665,29 +6814,28 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_real_6
 
-  !!---------------------------------------------------------------------------------------
-  !!--------------------------------hdf_read_dataset_double--------------------------------
-  !!---------------------------------------------------------------------------------------
 
-  !  \brief reads a scalar from an hdf5 file
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_read_dataset_double--------------------------------
+  !!----------------------------------------------------------------------------------------
+
+  !  \brief read a scalar from a hdf5 file
   subroutine hdf_read_dataset_double_0(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array               ! data to be written
+    real(dp), intent(out) :: array              ! data to be read
 
+    integer :: rank
     integer(HSIZE_T) :: dims(1)
     integer(HID_T) :: dset_id
     integer :: hdferror
@@ -6697,28 +6845,26 @@ contains
     end if
 
     ! set rank and dims
+    rank = 0
     dims = (/0/)
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_0
 
-  !  \brief reads a 1d array from an hdf5 file
+  !  \brief read a 1 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_double_1(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array(:)            ! data to be written
+    real(dp), intent(out) :: array(:)           ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(1)
@@ -6735,24 +6881,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_1
 
-  !  \brief reads a 2d array from an hdf5 file
+  !  \brief read a 2 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_double_2(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array(:, :)          ! data to be written
+    real(dp), intent(out) :: array(:,:)         ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(2)
@@ -6769,24 +6912,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_2
 
-  !  \brief reads a 3d array from an hdf5 file
+  !  \brief read a 3 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_double_3(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array(:, :, :)        ! data to be written
+    real(dp), intent(out) :: array(:,:,:)       ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(3)
@@ -6803,24 +6943,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_3
 
-  !  \brief reads a 4d array from an hdf5 file
+  !  \brief read a 4 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_double_4(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array(:, :, :, :)      ! data to be written
+    real(dp), intent(out) :: array(:,:,:,:)     ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(4)
@@ -6837,24 +6974,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_4
 
-  !  \brief reads a 5d array from an hdf5 file
+  !  \brief read a 5 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_double_5(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array(:, :, :, :, :)    ! data to be written
+    real(dp), intent(out) :: array(:,:,:,:,:)   ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(5)
@@ -6871,24 +7005,21 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_5
 
-  !  \brief reads a 6d array from an hdf5 file
+  !  \brief read a 6 - dimension array from a hdf5 file
   subroutine hdf_read_dataset_double_6(loc_id, dset_name, array)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
-    real(dp), intent(out) :: array(:, :, :, :, :, :)  ! data to be written
+    real(dp), intent(out) :: array(:,:,:,:,:,:) ! data to be read
 
     integer :: rank
     integer(HSIZE_T) :: dims(6)
@@ -6905,17 +7036,262 @@ contains
 
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset
+    ! read dataset
     call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dims, hdferror, xfer_prp=dplist_collective)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
     call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
   end subroutine hdf_read_dataset_double_6
+
+
+  !!----------------------------------------------------------------------------------------
+  !!--------------------------------hdf_read_dataset_complex_double--------------------------------
+  !!----------------------------------------------------------------------------------------
+
+  !  \brief read a scalar from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_0(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array           ! data to be read
+    real(dp) :: buffer(2)                       ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(1)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_0: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 0
+    dims = (/0/)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(1), buffer(2), kind=dp)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_0
+
+  !  \brief read a 1 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_1(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:)        ! data to be read
+    real(dp), allocatable, dimension(:,:) :: buffer ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(1)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_1: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 1
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    allocate (buffer(dims(1), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(:,1), buffer(:,2), kind=dp)
+    deallocate (buffer)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_1
+
+  !  \brief read a 2 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_2(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:)      ! data to be read
+    real(dp), allocatable, dimension(:,:,:) :: buffer ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(2)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_2: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 2
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    allocate (buffer(dims(1), dims(2), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(:,:,1), buffer(:,:,2), kind=dp)
+    deallocate (buffer)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_2
+
+  !  \brief read a 3 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_3(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:)    ! data to be read
+    real(dp), allocatable, dimension(:,:,:,:) :: buffer ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(3)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_3: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 3
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    allocate (buffer(dims(1), dims(2), dims(3), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(:,:,:,1), buffer(:,:,:,2), kind=dp)
+    deallocate (buffer)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_3
+
+  !  \brief read a 4 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_4(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:,:)  ! data to be read
+    real(dp), allocatable, dimension(:,:,:,:,:) :: buffer ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(4)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_4: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 4
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    allocate (buffer(dims(1), dims(2), dims(3), dims(4), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(:,:,:,:,1), buffer(:,:,:,:,2), kind=dp)
+    deallocate (buffer)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_4
+
+  !  \brief read a 5 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_5(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:,:,:)! data to be read
+    real(dp), allocatable, dimension(:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(5)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_5: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 5
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    allocate (buffer(dims(1), dims(2), dims(3), dims(4), dims(5), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(:,:,:,:,:,1), buffer(:,:,:,:,:,2), kind=dp)
+    deallocate (buffer)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_5
+
+  !  \brief read a 6 - dimension array from a hdf5 file
+  subroutine hdf_read_dataset_complex_double_6(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    complex(dp), intent(out) :: array(:,:,:,:,:,:)! data to be read
+    real(dp), allocatable, dimension(:,:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
+    integer :: rank
+    integer(HSIZE_T) :: dims(6)
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_complex_double_6: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = 6
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+    allocate (buffer(dims(1), dims(2), dims(3), dims(4), dims(5), dims(6), 2))
+    call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,:,1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,:,2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer(:,:,:,:,:,:,1), buffer(:,:,:,:,:,:,2), kind=dp)
+    deallocate (buffer)
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_complex_double_6
 
   !!---------------------------------------------------------------------------------------
   !!--------------------------------hdf_read_dataset_character--------------------------------
@@ -7120,282 +7496,7 @@ contains
     call h5dclose_f(dset_id, hdferror)
     !write(*,'(A20,I0)') "h5dclose: ", hdferror
 
-  end subroutine hdf_read_dataset_character_2
-
-  !!---------------------------------------------------------------------------------------
-  !!--------------------------------hdf_read_dataset_double_complex------------------------
-  !!---------------------------------------------------------------------------------------
-
-  !  \brief reads a scalar from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_0(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array           ! data to be read
-    real(dp) :: buffer(2)                       ! buffer to save real and imag part
-
-    integer(HSIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_0: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    dims = (/0/)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(1), buffer(2), kind=dp)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_0
-
-  !  \brief reads a 1d array from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_1(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array(:)        ! data to be written
-    real(dp), allocatable, dimension(:, :) :: buffer ! buffer to save real and imag part
-
-    integer :: rank
-    integer(HSIZE_T) :: dims(1)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_1: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    rank = 1
-    dims = shape(array, KIND=HSIZE_T)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    allocate (buffer(dims(1), 2))
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(:, 1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(:, 2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(:, 1), buffer(:, 2), kind=dp)
-    deallocate (buffer)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_1
-
-  !  \brief reads a 2d array from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_2(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array(:, :)        ! data to be written
-    real(dp), allocatable, dimension(:, :, :) :: buffer ! buffer to save real and imag part
-
-    integer :: rank
-    integer(HSIZE_T) :: dims(2)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_2: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    rank = 2
-    dims = shape(array, KIND=HSIZE_T)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    allocate (buffer(dims(1), dims(2), 2))
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(:, :, 1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(:, :, 2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(:, :, 1), buffer(:, :, 2), kind=dp)
-    deallocate (buffer)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_2
-
-  !  \brief reads a 3d array from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_3(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array(:, :, :)        ! data to be written
-    real(dp), allocatable, dimension(:, :, :, :) :: buffer ! buffer to save real and imag part
-
-    integer :: rank
-    integer(HSIZE_T) :: dims(3)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_3: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    rank = 3
-    dims = shape(array, KIND=HSIZE_T)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    allocate (buffer(dims(1), dims(2), dims(3), 2))
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(:, :, :, 1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(:, :, :, 2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(:, :, :, 1), buffer(:, :, :, 2), kind=dp)
-    deallocate (buffer)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_3
-
-  !  \brief reads a 4d array from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_4(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array(:, :, :, :)        ! data to be written
-    real(dp), allocatable, dimension(:, :, :, :, :) :: buffer ! buffer to save real and imag part
-
-    integer :: rank
-    integer(HSIZE_T) :: dims(4)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_4: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    rank = 4
-    dims = shape(array, KIND=HSIZE_T)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    allocate (buffer(dims(1), dims(2), dims(3), dims(4), 2))
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(:, :, :, :, 1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(:, :, :, :, 2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(:, :, :, :, 1), buffer(:, :, :, :, 2), kind=dp)
-    deallocate (buffer)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_4
-
-  !  \brief reads a 5d array from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_5(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array(:, :, :, :, :)        ! data to be written
-    real(dp), allocatable, dimension(:, :, :, :, :, :) :: buffer ! buffer to save real and imag part
-
-    integer :: rank
-    integer(HSIZE_T) :: dims(5)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_5: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    rank = 5
-    dims = shape(array, KIND=HSIZE_T)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    allocate (buffer(dims(1), dims(2), dims(3), dims(4), dims(5), 2))
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(:, :, :, :, :, 1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(:, :, :, :, :, 2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(:, :, :, :, :, 1), buffer(:, :, :, :, :, 2), kind=dp)
-    deallocate (buffer)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_5
-
-  !  \brief reads a 2d array from an hdf5 file
-  subroutine hdf_read_dataset_complex_double_6(loc_id, dset_name, array)
-
-    integer(HID_T), intent(in) :: loc_id        ! local id in file
-    character(len=*), intent(in) :: dset_name   ! name of dataset
-    complex(dp), intent(out) :: array(:, :, :, :, :, :)        ! data to be written
-    real(dp), allocatable, dimension(:, :, :, :, :, :, :) :: buffer ! buffer to save real and imag part
-
-    integer :: rank
-    integer(HSIZE_T) :: dims(6)
-    integer(HID_T) :: dset_id
-    integer :: hdferror
-
-    if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_read_dataset_complex_double_6: "//trim(dset_name)
-    end if
-
-    ! set rank and dims
-    rank = 2
-    dims = shape(array, KIND=HSIZE_T)
-
-    ! open dataset
-    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
-
-    ! read dataset
-    allocate (buffer(dims(1), dims(2), dims(3), dims(4), dims(5), dims(6), 2))
-    call h5dread_f(dset_id, complexd_field_id(1), buffer(:, :, :, :, :, :, 1), dims, hdferror, xfer_prp=dplist_collective)
-    call h5dread_f(dset_id, complexd_field_id(2), buffer(:, :, :, :, :, :, 2), dims, hdferror, xfer_prp=dplist_collective)
-    array = cmplx(buffer(:, :, :, :, :, :, 1), buffer(:, :, :, :, :, :, 2), kind=dp)
-    deallocate (buffer)
-    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
-
-    ! close all id's
-    call h5dclose_f(dset_id, hdferror)
-    !write(*,'(A20,I0)') "h5dclose: ", hdferror
-
-  end subroutine hdf_read_dataset_complex_double_6
-
-  !!---------------------------------------------------------------------------------------
+  end subroutine hdf_read_dataset_character_2  !!---------------------------------------------------------------------------------------
   !!---------------------------------------hdf_write_attr*---------------------------------
   !!---------------------------------------------------------------------------------------
 
@@ -7549,8 +7650,8 @@ contains
     call h5acreate_f(obj_id, attr_name, H5T_NATIVE_INTEGER, aspace_id, attr_id, hdferror)
     !write(*,'(A20,I0)') "h5dcreate: ", hdferror
 
-    ! write dataset, the data is write as 4 bytes integer
-    call h5awrite_f(attr_id, H5T_NATIVE_INTEGER, int(array), dims, hdferror)
+    ! write dataset
+    call h5awrite_f(attr_id, H5T_NATIVE_INTEGER, int(array, kind=4), dims, hdferror)
     !write(*,'(A20,I0)') "h5dwrite: ", hdferror
 
     ! close all id's
@@ -7931,6 +8032,55 @@ contains
     end if
 
   end subroutine hdf_read_attr_integer_1
+
+  !  \brief writes a scalar attribute
+  subroutine hdf_read_attr_integer_1_8(loc_id, obj_name, attr_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: obj_name    ! object name attribute will be attached to (if "" use loc_id)
+    character(len=*), intent(in) :: attr_name   ! name of attribute
+    integer(HSIZE_T), intent(out) :: array(:)   ! data to write to attribute
+    integer, allocatable :: array_buffer(:)
+
+    integer :: rank
+    integer(HSIZE_T) :: dims(1)
+    integer(HID_T) :: obj_id, attr_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_attr_integer_1: "//trim(obj_name)//"/"//trim(attr_name)
+    end if
+
+    ! open object
+    if (obj_name == "") then
+      obj_id = loc_id
+    else
+      call h5oopen_f(loc_id, obj_name, obj_id, hdferror)
+    end if
+
+    ! create dataspace
+    rank = 1
+    dims = shape(array, KIND=HSIZE_T)
+
+    ! create attribute
+    call h5aopen_f(obj_id, attr_name, attr_id, hdferror)
+    !write(*,'(A20,I0)') "h5dcreate: ", hdferror
+
+    ! write dataset
+    allocate(array_buffer(dims(1)))
+    call h5aread_f(attr_id, H5T_NATIVE_INTEGER, array_buffer, dims, hdferror)
+    array = int(array_buffer, kind=HSIZE_T)
+    deallocate(array_buffer)
+    !write(*,'(A20,I0)') "h5dwrite: ", hdferror
+
+    ! close all id's
+    call h5aclose_f(attr_id, hdferror)
+    !write(*,'(A20,I0)') "h5dclose: ", hdferror
+    if (obj_name /= "") then
+      call h5oclose_f(obj_id, hdferror)
+    end if
+
+  end subroutine hdf_read_attr_integer_1_8
 
   !  \brief writes a scalar attribute
   subroutine hdf_read_attr_real_0(loc_id, obj_name, attr_name, array)

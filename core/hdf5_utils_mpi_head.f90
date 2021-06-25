@@ -37,7 +37,7 @@ module hdf5_utils_mpi
 
   public :: hdf_open_file, hdf_close_file
   public :: hdf_create_group, hdf_open_group, hdf_close_group
-  public :: hdf_exists, hdf_get_rank, hdf_get_dims
+  public :: hdf_exists, hdf_get_rank, hdf_get_dims, hdf_set_dims
   public :: hdf_write_dataset, hdf_read_dataset
   public :: hdf_write_attribute, hdf_read_attribute
   public :: hdf_create_dataset
@@ -255,12 +255,18 @@ module hdf5_utils_mpi
   interface hdf_read_attribute
     module procedure hdf_read_attr_integer_0
     module procedure hdf_read_attr_integer_1
+    module procedure hdf_read_attr_integer_1_8
     module procedure hdf_read_attr_real_0
     module procedure hdf_read_attr_real_1
     module procedure hdf_read_attr_double_0
     module procedure hdf_read_attr_double_1
     module procedure hdf_read_attr_string
   end interface hdf_read_attribute
+
+  interface hdf_get_dims
+    module procedure hdf_get_dims_4
+    module procedure hdf_get_dims_8
+  end interface hdf_get_dims
 
   ! precision for this file
   integer, parameter :: sp = kind(1.0)     ! single precision
@@ -287,7 +293,7 @@ module hdf5_utils_mpi
   integer :: mpi_comm, mpi_irank, mpi_nrank, mpi_ierr, mpi_hsize_t
   integer(HID_T) :: file_plist_id   !< parallel file access property
   integer(HID_T) :: dplist_collective, dplist_independent !< dataset access property
-
+  integer :: mpi_nrank_old
 
 contains
 
@@ -475,8 +481,11 @@ contains
 
     call hdf_preset_prop()
 
+    mpi_nrank_old = -1
     if ((status2 .ne. 'OLD') .or. (action2 == 'WRITE') .or. (action2 == 'READWRITE')) then
       call hdf_preset_file_attribute(file_id)
+    else
+      call hdf_read_attribute(file_id, "", 'mpi_nrank', mpi_nrank_old)
     end if
 
     !write(*,'(A20,I0)') "h5fcreate: ", hdferror
@@ -682,7 +691,7 @@ contains
   end subroutine hdf_get_rank
 
   !>  \brief get the dimensions of a dataset
-  subroutine hdf_get_dims(loc_id, dset_name, dims)
+  subroutine hdf_get_dims_4(loc_id, dset_name, dims)
 
     integer(HID_T), intent(in) :: loc_id        !< location id
     character(len=*), intent(in) :: dset_name   !< name of dataset
@@ -694,7 +703,7 @@ contains
     integer :: hdferror
 
     if (hdf_print_messages) then
-      write (*, '(A)') "->hdf_get_dims"
+      write (*, '(A)') "->hdf_get_dims_4"
     end if
 
     ! open dataset
@@ -714,7 +723,69 @@ contains
     call h5sclose_f(dspace_id, hdferror)
     call h5dclose_f(dset_id, hdferror)
 
-  end subroutine hdf_get_dims
+  end subroutine hdf_get_dims_4
+
+  !>  \brief get the dimensions of a dataset
+  subroutine hdf_get_dims_8(loc_id, dset_name, dims)
+
+    integer(HID_T), intent(in) :: loc_id        !< location id
+    character(len=*), intent(in) :: dset_name   !< name of dataset
+    integer(HSIZE_T), intent(out) :: dims(:)             !< dimensions of the dataset
+
+    integer(HID_T) :: dset_id, dspace_id
+    integer :: rank
+    integer(HSIZE_T) :: dset_dims(6), max_dims(6)
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "->hdf_get_dims_8"
+    end if
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! get dataspace
+    call h5dget_space_f(dset_id, dspace_id, hdferror)
+
+    ! get rank (ndims)
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, hdferror)
+
+    ! get dims
+    call h5sget_simple_extent_dims_f(dspace_id, dset_dims(1:rank), max_dims(1:rank), hdferror)
+    dims(1:rank) = dset_dims(1:rank)
+
+    ! close id's
+    call h5sclose_f(dspace_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_get_dims_8
+
+  !>  \brief set the dimensions of a dataset
+  subroutine hdf_set_dims(loc_id, dset_name, dims)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+    integer, allocatable :: dims(:)
+
+    integer :: rank, hdferror
+    integer(HID_T) :: dset_id, dspace_id
+    integer(HSIZE_T) :: dims_data(6), max_dims(6)
+
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+    call h5dget_space_f(dset_id, dspace_id, hdferror)
+    call h5sget_simple_extent_ndims_f(dspace_id, rank, hdferror)
+
+    if (allocated(dims)) then
+      deallocate(dims)
+    end if
+    allocate(dims(rank))
+
+    call h5sget_simple_extent_dims_f(dspace_id, dims_data(1:rank), max_dims(1:rank), hdferror)
+    dims = int(dims_data(1:rank))
+    call h5sclose_f(dspace_id, hdferror)
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_set_dims
 
   !     - hdf_get_kind   (H5Dget_type)
 

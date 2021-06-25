@@ -115,7 +115,7 @@ write_array_template = '''  subroutine hdf_write_dataset_{ftype_name}_{rank}(loc
 
     integer :: rank, ii, jj
     integer(HSIZE_T), dimension({rank}) :: dimsf, dimsm, offset
-    integer(HID_T) :: dset_id, file_space_id, mem_space_id, plist_id
+    integer(HID_T) :: dset_id, file_space_id, mem_space_id
     character(len=32) :: filter_case
     integer :: hdferror, processor_write, axis_write, status(MPI_STATUS_SIZE)
     integer(HSIZE_T) :: offset_end
@@ -288,3 +288,39 @@ write_complex_dataset_template = '''    if (processor_write == -1) then
                       xfer_prp=dplist_independent)
     end if'''
 
+read_array_template = '''  subroutine hdf_read_dataset_{ftype_name}_{rank}(loc_id, dset_name, array)
+
+    integer(HID_T), intent(in) :: loc_id        ! local id in file
+    character(len=*), intent(in) :: dset_name   ! name of dataset
+{declaration}
+{additional_declaration}
+    integer :: rank
+{dims_declaration}
+    integer(HID_T) :: dset_id
+    integer :: hdferror
+
+    if (hdf_print_messages) then
+      write (*, '(A)') "--->hdf_read_dataset_{ftype_name}_{rank}: "//trim(dset_name)
+    end if
+
+    ! set rank and dims
+    rank = {rank}
+{set_dims}
+
+    ! open dataset
+    call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
+
+    ! read dataset
+{read_string}
+
+    ! close all id's
+    call h5dclose_f(dset_id, hdferror)
+
+  end subroutine hdf_read_dataset_{ftype_name}_{rank}
+'''
+
+read_regular_dataset_template = '''    call h5dread_f(dset_id, {h5type}, array, dims, hdferror, xfer_prp=dplist_collective)'''
+
+read_complex_dataset_template = '''    call h5dread_f(dset_id, complexd_field_id(1), buffer({buffer_indexing}1), dims, hdferror, xfer_prp=dplist_collective)
+    call h5dread_f(dset_id, complexd_field_id(2), buffer({buffer_indexing}2), dims, hdferror, xfer_prp=dplist_collective)
+    array = cmplx(buffer({buffer_indexing}1), buffer({buffer_indexing}2), kind=dp)'''

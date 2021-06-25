@@ -27,11 +27,12 @@
      CHARACTER(len=20) :: data4
      character(len=:), dimension(:, :), allocatable :: data5
 
+     integer, allocatable :: dims(:), offset(:)
 
      INTEGER :: rank = 2 ! Dataset rank
 
      INTEGER :: error, error_n  ! Error flags
-     INTEGER :: i, j
+     INTEGER :: i, j, ii, jj
      !
      ! MPI definitions and calls.
      !
@@ -127,16 +128,42 @@
      call hdf_close_file(file_id)
 
      ! read test
-     ! call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
-     ! call hdf_read_dataset(file_id, "data0", data0)
-     ! call hdf_read_dataset(file_id, "data1", data1)
+     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
+     call hdf_read_dataset(file_id, "data0", data0)
+     call hdf_read_dataset(file_id, "data1", data1)
+
+     ! data2 = 0
+     ! call hdf_read_dataset(file_id, "data2", data2)
+
+     deallocate(data2)
+     ii = 0
+     do jj = 1, mpi_size
+          ii = ii + (jj-1+2)*2
+     end do
+     ii = ii / mpi_size
+     allocate(data2(ii), offset(mpi_size))
+     offset(1) = 0
+     do jj = 2, mpi_size
+          offset(jj) = offset(jj-1) + ii
+     end do
+     call hdf_read_dataset(file_id, "data2", data2, offset=offset)
+
+
+
+     write(*,*) "Rank=", mpi_rank, "data2 = ", data2
+
+     call hdf_set_dims(file_id, 'data3', dims)
+     deallocate(data3)
+     allocate(data3(dims(1), dims(2)))
+     call hdf_read_dataset(file_id, "data3", data3)
      ! if (mpi_rank == 2) then
      !      write(*,*) 'data0:'
      !      write(*,*) data0
      !      write(*,*) 'data1:'
      !      write(*,*) data1
+
      ! end if
-     ! call hdf_close_file(file_id)
+     call hdf_close_file(file_id)
 
 
      DEALLOCATE(data0, data1, data2, data3, data5)
