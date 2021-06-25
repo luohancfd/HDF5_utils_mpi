@@ -177,7 +177,7 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
     array_comma = ':,' * (rank - 1) + ':'
     buffer_indexing = array_comma + ','
 
-  buffer_size = ', '.join([f'dims({i})' for i in range(1, rank+1)])
+  buffer_size = ', '.join([f'dimsm({i})' for i in range(1, rank+1)])
 
   if rank == 0:
     declaration = f'{ftype}, intent(out) :: array'
@@ -186,6 +186,7 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
   declaration = ' '*nspace + declaration
   declaration = '{:48s}! data to be read'.format(declaration)
 
+
   additional_declaration = ''
   if ftype_name == 'complex_double':
     if rank == 0:
@@ -193,14 +194,23 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
     else:
       additional_declaration = ' '*nspace + f'real(dp), allocatable, dimension({array_comma},:) :: buffer ! buffer to save real and imag part'
 
-  set_dims = ' '*nspace + 'dims = shape(array, KIND=HSIZE_T)'
-  dims_declaration = ' '*nspace + f'integer(HSIZE_T) :: dims({rank})'
+
+  dims_declaration = [
+    f'integer(HSIZE_T),dimension({rank}) :: dimsf, dimsm, offset_local',
+  ]
   if rank == 0:
-    set_dims = ' '*nspace + 'dims = (/0/)'
-    dims_declaration = ' '*nspace + f'integer(HSIZE_T) :: dims(1)'
+    dims_declaration = [
+      f'integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local',
+    ]
+  dims_declaration = '\n'.join([' '*nspace + i for i in dims_declaration])
+
+
+  mem_space_creation = ' '*(nspace+2) + 'call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)'
+  if rank == 0:
+    mem_space_creation = ' '*(nspace+2) + 'call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)'
 
   if ftype_name == 'complex_double':
-    read_string = read_complex_dataset_template.format(buffer_indexing=buffer_indexing)
+    read_string = read_complex_dataset_template.format(buffer_indexing=buffer_indexing, mem_space_creation=mem_space_creation)
     if rank != 0:
       read_string = read_string.split('\n')
       read_string = [f'    allocate (buffer({buffer_size}, 2))'] + read_string + [
@@ -208,16 +218,23 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
       ]
       read_string = '\n'.join(read_string)
   else:
-    read_string = read_regular_dataset_template.format(h5type=h5type)
+    read_string = read_regular_dataset_template.format(h5type=h5type, mem_space_creation=mem_space_creation)
+
+  if rank == 0:
+    set_offset = configure_offset_scalar.format(ftype_name=ftype_name, rank=rank)
+  else:
+    set_offset = configure_offset_array.format(ftype_name=ftype_name, rank=rank)
+
+
 
   config = {
     'ftype_name': ftype_name,
     'declaration': declaration,
     'additional_declaration': additional_declaration,
     'rank': rank,
-    'set_dims': set_dims,
     'read_string': read_string,
     'dims_declaration': dims_declaration,
+    'set_offset': set_offset
   }
 
   return read_array_template.format(**config)
