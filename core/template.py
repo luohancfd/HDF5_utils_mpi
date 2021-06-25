@@ -330,13 +330,11 @@ read_array_template = '''  subroutine hdf_read_dataset_{ftype_name}_{rank}(loc_i
 
     ! syntax check of offset and set offset_glob / count_glob
 {set_offset}
-
     ! open dataset
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
 {read_string}
-
     if (is_parallel) then
       deallocate(offset_glob, count_glob)
       call h5sclose_f(mem_space_id,  hdferror)

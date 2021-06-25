@@ -27,6 +27,8 @@ PROGRAM DATASET
   CHARACTER(len=20) :: data4
   character(len=:), dimension(:, :), allocatable :: data5
   complex(kind=8) :: data6
+  CHARACTER(len=20) :: data7
+  character(len=:), dimension(:), allocatable :: data8
 
   integer, allocatable :: dims(:), offset(:)
 
@@ -98,6 +100,17 @@ PROGRAM DATASET
 
   ! data6 : complex number
   data6 = cmplx(mpi_rank, 1.0)
+
+  ! data7: single string
+  write (data7, '("MPI_SIZE=", I2)') mpi_size
+
+  ! data8: array of string with different length
+  i = 20 + mpi_rank
+  allocate (character(len=i)::data8(mpi_rank + 1))
+  do i = 1, mpi_rank + 1
+    write (data8(i), "('Rank=',I2,'_data',I2))") mpi_rank, i
+  end do
+
   ! ================ Write ==============================
 
   call hdf_open_file(file_id, "test_hl.h5", STATUS='NEW')
@@ -132,7 +145,7 @@ PROGRAM DATASET
   !
   ! The following is a bad call since data4 has different values across processors
   ! there is no guarantee what will be saved. It is only acceptable if there is only one core
-  ! call hdf_write_dataset(file_id, "data4", data4)
+  !    call hdf_write_dataset(file_id, "data4", data4)
   !
   ! The following will stack along axis 1, thus an array with size = num_of_processors and type
   ! = character(len=20) will be writtent
@@ -144,10 +157,14 @@ PROGRAM DATASET
   ! Then use that as the fundamental type and stack data5 along axis = 2, similar to data3
   call hdf_write_dataset(file_id, "data5", data5, axis=2)
 
-
   ! data6 is a single complex number
   call hdf_write_dataset(file_id, "data6", data6, axis=1)
 
+  ! data7 is a single string with same values across processors
+  call hdf_write_dataset(file_id, "data7", data7)
+
+  ! data8 stack along axis = 1
+  call hdf_write_dataset(file_id, "data8", data8, axis=1)
 
   ! call hdf_write_attribute(file_id, "", "test", 1)
   call hdf_close_file(file_id)
@@ -197,8 +214,37 @@ PROGRAM DATASET
     call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
   end if
   write (*, *) "Rank=", mpi_rank, "data3:"
-  do ii = 0,10
-    write(*,'("  ", 20(F6.2,"+",F5.2,"i",",", 2X))') data3(ii,:)
+  do ii = 0, 10
+    write (*, '("  ", 20(F6.2,"+",F5.2,"i",",", 2X))') data3(ii, :)
+  end do
+  call flush (6)
+  if (mpi_rank < mpi_size - 1) then
+    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  end if
+
+  ! data4
+  data4 = ''
+  call hdf_read_dataset(file_id, "data4", data4)
+  if (mpi_rank > 0) then
+    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  end if
+  write (*, *) "Rank=", mpi_rank, "data4:|", data4, "|"
+  call flush (6)
+  if (mpi_rank < mpi_size - 1) then
+    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  end if
+
+  ! data5
+  call hdf_read_dataset(file_id, "data5", data5)
+  if (mpi_rank > 0) then
+    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  end if
+  write (*, *) "Rank=", mpi_rank, "data5:"
+  do ii = 0, 10
+    do jj = 1, mpi_rank + 2
+      write (*, '(A,",")', advance='no') data5(ii, jj)
+    end do
+    write (*, *)
   end do
   call flush (6)
   if (mpi_rank < mpi_size - 1) then
@@ -210,14 +256,37 @@ PROGRAM DATASET
   if (mpi_rank > 0) then
     call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
   end if
-  write (*, *) "Rank=", mpi_rank, "data6:", data6
+  write (*, "(A, I2,A,F6.2,'+',F6.2,'i')") "Rank=", mpi_rank, "  data6:", data6
   call flush (6)
   if (mpi_rank < mpi_size - 1) then
     call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
   end if
 
+  ! data7
+  call hdf_read_dataset(file_id, "data7", data7)
+  if (mpi_rank > 0) then
+    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  end if
+  write (*, *) "Rank=", mpi_rank, "data7:|", data7, "|"
+  call flush (6)
+  if (mpi_rank < mpi_size - 1) then
+    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  end if
 
-
+  ! data8
+  data8 = ''
+  call hdf_read_dataset(file_id, "data8", data8)
+  if (mpi_rank > 0) then
+    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  end if
+  write (*, *) "Rank=", mpi_rank, "data8:"
+  do i = 1, mpi_rank + 1
+    write (*, "(2X, '|',A,'|')") data8(i)
+  end do
+  call flush (6)
+  if (mpi_rank < mpi_size - 1) then
+    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  end if
 
   ! ! data2 = 0
   ! ! call hdf_read_dataset(file_id, "data2", data2)
