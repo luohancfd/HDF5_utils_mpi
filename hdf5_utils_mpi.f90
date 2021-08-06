@@ -673,17 +673,16 @@ contains
     integer(HID_T), intent(in) :: file_id, loc_id  !< location id
     character(len=*), intent(in) :: dset_name      !< dataset name
     !< size for the read buffer each processor can have different value
-    integer, allocatable :: offset(:)
+    integer :: offset(:)
     integer, intent(in), optional :: new_size
 
     integer :: mpi_nrank_, ii, jj, kk
     integer, allocatable :: count_old(:), total_count
 
-    ! ignore whatever is set originally
-    if (allocated(offset)) then
-      deallocate(offset)
+    if (size(offset) .ne. mpi_nrank) then
+      write(*,'(A)') "-->hdf_set_even_offset: size of offset is wrong"
+      call MPI_Abort(mpi_comm, 1, mpi_ierr)
     end if
-    allocate(offset(mpi_nrank))
 
     call hdf_read_attribute(file_id, "", "mpi_nrank", mpi_nrank_)
 

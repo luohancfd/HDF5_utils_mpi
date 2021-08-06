@@ -34,7 +34,7 @@ FFLAGS += -g# -Wall
 
 .PHONY: clean docs
 
-all: hdf5_test_1.x hdf5_test_2.x
+all: hdf5_test_1.x hdf5_test_2.x hdf5_test_3.x hdf5_test_4.x
 
 hdf5_test_1.x: parallel.o hdf5_utils_mpi.o
 	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
@@ -42,9 +42,19 @@ hdf5_test_1.x: parallel.o hdf5_utils_mpi.o
 hdf5_test_2.x: parallel_change_core.o hdf5_utils_mpi.o
 	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
 
+hdf5_test_3.x: parallel_write.o hdf5_utils_mpi.o
+	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
+
+hdf5_test_4.x: parallel_read.o hdf5_utils_mpi.o
+	$(FC) $(FFLAGS) -o $@ $^ $(LDFLAGS)
+
 parallel_change_core.o: hdf5_utils_mpi.o
 
 parallel.o: hdf5_utils_mpi.o
+
+parallel_write.o: hdf5_utils_mpi.o
+
+parallel_read.o: hdf5_utils_mpi.o
 
 %.o : %.f90
 	$(FC) $(FFLAGS) -c -o $@ $<
