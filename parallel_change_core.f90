@@ -144,6 +144,7 @@ PROGRAM DATASET
     call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
   end if
 
+  ! data22 ================ this method preset data22
 
 
 

@@ -6337,11 +6337,12 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief read a scalar from a hdf5 file
-  subroutine hdf_read_dataset_integer_0(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_0(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array               ! data to be read
 
     integer :: rank
@@ -6373,6 +6374,10 @@ contains
       end if
     end if
 
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
+    end if
+
     ! allocate offset array
     if (is_parallel) then
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
@@ -6390,6 +6395,8 @@ contains
         offset_glob(ii) = ii -1
         count_glob(ii)  = 1
       end do
+
+      count_local = 1
     end if
     dimsm = (/1/)
 
@@ -6425,11 +6432,12 @@ contains
   end subroutine hdf_read_dataset_integer_0
 
   !  \brief read a 1 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_integer_1(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_1(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array(:)            ! data to be read
 
     integer :: rank
@@ -6459,6 +6467,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -6563,11 +6575,12 @@ contains
   end subroutine hdf_read_dataset_integer_1
 
   !  \brief read a 2 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_integer_2(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_2(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array(:,:)          ! data to be read
 
     integer :: rank
@@ -6597,6 +6610,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -6701,11 +6718,12 @@ contains
   end subroutine hdf_read_dataset_integer_2
 
   !  \brief read a 3 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_integer_3(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_3(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array(:,:,:)        ! data to be read
 
     integer :: rank
@@ -6735,6 +6753,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -6839,11 +6861,12 @@ contains
   end subroutine hdf_read_dataset_integer_3
 
   !  \brief read a 4 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_integer_4(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_4(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array(:,:,:,:)      ! data to be read
 
     integer :: rank
@@ -6873,6 +6896,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -6977,11 +7004,12 @@ contains
   end subroutine hdf_read_dataset_integer_4
 
   !  \brief read a 5 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_integer_5(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_5(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array(:,:,:,:,:)    ! data to be read
 
     integer :: rank
@@ -7011,6 +7039,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -7115,11 +7147,12 @@ contains
   end subroutine hdf_read_dataset_integer_5
 
   !  \brief read a 6 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_integer_6(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_integer_6(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     integer, intent(out) :: array(:,:,:,:,:,:)  ! data to be read
 
     integer :: rank
@@ -7149,6 +7182,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -7258,11 +7295,12 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief read a scalar from a hdf5 file
-  subroutine hdf_read_dataset_real_0(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_0(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array              ! data to be read
 
     integer :: rank
@@ -7294,6 +7332,10 @@ contains
       end if
     end if
 
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
+    end if
+
     ! allocate offset array
     if (is_parallel) then
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
@@ -7311,6 +7353,8 @@ contains
         offset_glob(ii) = ii -1
         count_glob(ii)  = 1
       end do
+
+      count_local = 1
     end if
     dimsm = (/1/)
 
@@ -7346,11 +7390,12 @@ contains
   end subroutine hdf_read_dataset_real_0
 
   !  \brief read a 1 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_real_1(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_1(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array(:)           ! data to be read
 
     integer :: rank
@@ -7380,6 +7425,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -7484,11 +7533,12 @@ contains
   end subroutine hdf_read_dataset_real_1
 
   !  \brief read a 2 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_real_2(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_2(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array(:,:)         ! data to be read
 
     integer :: rank
@@ -7518,6 +7568,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -7622,11 +7676,12 @@ contains
   end subroutine hdf_read_dataset_real_2
 
   !  \brief read a 3 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_real_3(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_3(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array(:,:,:)       ! data to be read
 
     integer :: rank
@@ -7656,6 +7711,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -7760,11 +7819,12 @@ contains
   end subroutine hdf_read_dataset_real_3
 
   !  \brief read a 4 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_real_4(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_4(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array(:,:,:,:)     ! data to be read
 
     integer :: rank
@@ -7794,6 +7854,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -7898,11 +7962,12 @@ contains
   end subroutine hdf_read_dataset_real_4
 
   !  \brief read a 5 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_real_5(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_5(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array(:,:,:,:,:)   ! data to be read
 
     integer :: rank
@@ -7932,6 +7997,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8036,11 +8105,12 @@ contains
   end subroutine hdf_read_dataset_real_5
 
   !  \brief read a 6 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_real_6(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_real_6(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(sp), intent(out) :: array(:,:,:,:,:,:) ! data to be read
 
     integer :: rank
@@ -8070,6 +8140,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8179,11 +8253,12 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief read a scalar from a hdf5 file
-  subroutine hdf_read_dataset_double_0(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_0(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array              ! data to be read
 
     integer :: rank
@@ -8215,6 +8290,10 @@ contains
       end if
     end if
 
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
+    end if
+
     ! allocate offset array
     if (is_parallel) then
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
@@ -8232,6 +8311,8 @@ contains
         offset_glob(ii) = ii -1
         count_glob(ii)  = 1
       end do
+
+      count_local = 1
     end if
     dimsm = (/1/)
 
@@ -8267,11 +8348,12 @@ contains
   end subroutine hdf_read_dataset_double_0
 
   !  \brief read a 1 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_double_1(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_1(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array(:)           ! data to be read
 
     integer :: rank
@@ -8301,6 +8383,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8405,11 +8491,12 @@ contains
   end subroutine hdf_read_dataset_double_1
 
   !  \brief read a 2 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_double_2(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_2(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array(:,:)         ! data to be read
 
     integer :: rank
@@ -8439,6 +8526,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8543,11 +8634,12 @@ contains
   end subroutine hdf_read_dataset_double_2
 
   !  \brief read a 3 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_double_3(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_3(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array(:,:,:)       ! data to be read
 
     integer :: rank
@@ -8577,6 +8669,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8681,11 +8777,12 @@ contains
   end subroutine hdf_read_dataset_double_3
 
   !  \brief read a 4 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_double_4(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_4(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array(:,:,:,:)     ! data to be read
 
     integer :: rank
@@ -8715,6 +8812,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8819,11 +8920,12 @@ contains
   end subroutine hdf_read_dataset_double_4
 
   !  \brief read a 5 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_double_5(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_5(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array(:,:,:,:,:)   ! data to be read
 
     integer :: rank
@@ -8853,6 +8955,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -8957,11 +9063,12 @@ contains
   end subroutine hdf_read_dataset_double_5
 
   !  \brief read a 6 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_double_6(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_double_6(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     real(dp), intent(out) :: array(:,:,:,:,:,:) ! data to be read
 
     integer :: rank
@@ -8991,6 +9098,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -9100,11 +9211,12 @@ contains
   !!----------------------------------------------------------------------------------------
 
   !  \brief read a scalar from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_0(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_0(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array           ! data to be read
     real(dp) :: buffer(2)                       ! buffer to save real and imag part
     integer :: rank
@@ -9136,6 +9248,10 @@ contains
       end if
     end if
 
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
+    end if
+
     ! allocate offset array
     if (is_parallel) then
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
@@ -9153,6 +9269,8 @@ contains
         offset_glob(ii) = ii -1
         count_glob(ii)  = 1
       end do
+
+      count_local = 1
     end if
     dimsm = (/1/)
 
@@ -9195,11 +9313,12 @@ contains
   end subroutine hdf_read_dataset_complex_double_0
 
   !  \brief read a 1 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_1(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_1(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array(:)        ! data to be read
     real(dp), allocatable, dimension(:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
@@ -9229,6 +9348,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -9342,11 +9465,12 @@ contains
   end subroutine hdf_read_dataset_complex_double_1
 
   !  \brief read a 2 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_2(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_2(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array(:,:)      ! data to be read
     real(dp), allocatable, dimension(:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
@@ -9376,6 +9500,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -9489,11 +9617,12 @@ contains
   end subroutine hdf_read_dataset_complex_double_2
 
   !  \brief read a 3 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_3(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_3(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array(:,:,:)    ! data to be read
     real(dp), allocatable, dimension(:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
@@ -9523,6 +9652,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -9636,11 +9769,12 @@ contains
   end subroutine hdf_read_dataset_complex_double_3
 
   !  \brief read a 4 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_4(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_4(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array(:,:,:,:)  ! data to be read
     real(dp), allocatable, dimension(:,:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
@@ -9670,6 +9804,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -9783,11 +9921,12 @@ contains
   end subroutine hdf_read_dataset_complex_double_4
 
   !  \brief read a 5 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_5(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_5(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array(:,:,:,:,:)! data to be read
     real(dp), allocatable, dimension(:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
@@ -9817,6 +9956,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -9930,11 +10073,12 @@ contains
   end subroutine hdf_read_dataset_complex_double_5
 
   !  \brief read a 6 - dimension array from a hdf5 file
-  subroutine hdf_read_dataset_complex_double_6(loc_id, dset_name, array, offset)
+  subroutine hdf_read_dataset_complex_double_6(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
     complex(dp), intent(out) :: array(:,:,:,:,:,:)! data to be read
     real(dp), allocatable, dimension(:,:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
@@ -9964,6 +10108,10 @@ contains
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array

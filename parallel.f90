@@ -16,14 +16,17 @@ PROGRAM DATASET
 
   INTEGER, ALLOCATABLE :: data0(:, :)   ! Data to write
   real(kind=8), ALLOCATABLE :: data1(:)   ! Data to write
-  integer, allocatable :: data2(:, :)
+  integer, allocatable :: data2(:, :), data2buf(:)
   complex(kind=8), allocatable :: data3(:, :)
 
   CHARACTER(len=20) :: data4
   character(len=:), dimension(:, :), allocatable :: data5
   complex(kind=8) :: data6
   CHARACTER(len=20) :: data7
+  CHARACTER(len=20) :: gname
   character(len=:), dimension(:), allocatable :: data8
+
+  integer(HID_T) :: gid
 
   integer, allocatable :: dims(:), offset(:)
 
@@ -127,6 +130,14 @@ PROGRAM DATASET
   ! we stack the value along axis = 1 and write it to the file
   call hdf_write_dataset(file_id, "data2", data2, axis=1)
 
+  ! data2_group is a group that only write portion of the matrix
+  call hdf_create_group(file_id, 'data2_group')
+  do i = 1,5
+    j = (mpi_rank + 2)*2 - i
+    write(gname, '(A, I1)') 'col_', i
+    call hdf_write_dataset(file_id, 'data2_group/'//gname, data2(1:j,i), axis=1)
+  end do
+
   ! data3 is a 2D array of complex with the same size on the first dimension, but different size
   ! on the second dimension
   !
@@ -210,6 +221,17 @@ PROGRAM DATASET
     call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
   end if
 
+  allocate(data2buf(24))
+  call hdf_read_dataset(file_id, 'data2_group/col_1', data2buf, non_parallel=.true.)
+  if (mpi_rank > 0) then
+    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  end if
+  write (*, *) "Rank=", mpi_rank, "data2-col1=", data2buf
+  call flush (6)
+  if (mpi_rank < mpi_size - 1) then
+    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  end if
+
   ! data3
   call hdf_read_dataset(file_id, "data3", data3)
   if (mpi_rank > 0) then
@@ -275,28 +297,36 @@ PROGRAM DATASET
     call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
   end if
 
-  ! data8
-  do i = 1, mpi_rank+1
-    write(data8(i), *)
-  end do
+  ! ! data8
+  ! do i = 1, mpi_rank+1
+  !   write(data8(i), *)
+  ! end do
 
-  call hdf_read_dataset(file_id, "data8", data8)
-  if (mpi_rank > 0) then
-    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
-  end if
-  write (*, *) "Rank=", mpi_rank, "data8:"
-  do i = 1, mpi_rank + 1
-    write (*, "(2X, '|',A,'|')") data8(i)
-  end do
-  call flush (6)
-  if (mpi_rank < mpi_size - 1) then
-    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
-  end if
+  ! call hdf_read_dataset(file_id, "data8", data8)
+  ! if (mpi_rank > 0) then
+  !   call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  ! end if
+  ! write (*, *) "Rank=", mpi_rank, "data8:"
+  ! do i = 1, mpi_rank + 1
+  !   write (*, "(2X, '|',A,'|')") data8(i)
+  ! end do
+  ! call flush (6)
+  ! if (mpi_rank < mpi_size - 1) then
+  !   call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  ! end if
 
   call hdf_close_file(file_id)
 
-  DEALLOCATE (data0, data1, data2, data3, data5, data8)
 
+  call hdf_open_file(file_id, "test_hl_2.h5", STATUS='NEW')
+  do i = 1 , mpi_size
+    write(data4, '("data",I1)') i
+    call hdf_write_dataset(file_id, trim(data4), data2, processor=i-1)
+  end do
+  call hdf_close_file(file_id)
+
+
+  DEALLOCATE (data0, data1, data2, data3, data5, data8)
   CALL MPI_FINALIZE(mpierror)
 
 END PROGRAM DATASET

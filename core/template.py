@@ -288,11 +288,12 @@ write_complex_dataset_template = '''    if (processor_write == -1) then
                       xfer_prp=dplist_independent)
     end if'''
 
-read_array_template = '''  subroutine hdf_read_dataset_{ftype_name}_{rank}(loc_id, dset_name, array, offset)
+read_array_template = '''  subroutine hdf_read_dataset_{ftype_name}_{rank}(loc_id, dset_name, array, offset, non_parallel)
 
     integer(HID_T), intent(in) :: loc_id        ! local id in file
     character(len=*), intent(in) :: dset_name   ! name of dataset
     integer, optional, intent(in) :: offset(:)  ! offset of loading
+    logical, optional, intent(in) :: non_parallel         ! load the data as it is
 {declaration}
 {additional_declaration}
     integer :: rank
@@ -322,6 +323,10 @@ read_array_template = '''  subroutine hdf_read_dataset_{ftype_name}_{rank}(loc_i
       if (axis_write .ne. -1) then
         is_parallel = .true.
       end if
+    end if
+
+    if (present(non_parallel) .and. rank > 0) then
+      if (non_parallel) is_parallel = .false.
     end if
 
     ! allocate offset array
@@ -465,6 +470,8 @@ configure_offset_scalar = '''    if (is_parallel) then
         offset_glob(ii) = ii -1
         count_glob(ii)  = 1
       end do
+
+      count_local = 1
     end if
     dimsm = (/1/)
 '''
