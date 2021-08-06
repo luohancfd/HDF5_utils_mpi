@@ -116,6 +116,11 @@ module hdf5_utils_mpi
     module procedure hdf_write_dataset_complex_double_6
   end interface hdf_write_dataset
 
+  interface hdf_set_even_offset
+    module procedure hdf_set_even_offset_from_dataset
+    module procedure hdf_set_even_offset_from_number
+  end interface hdf_set_even_offset
+
   !>  \brief Generic interface to write a vector to dataset
   !>
   !>  The vector is is written out in along the fast dimension
@@ -663,7 +668,7 @@ contains
   end subroutine hdf_close_group
 
   !>  \brief Set even offset for read_dataset
-  subroutine hdf_set_even_offset(file_id, loc_id, dset_name, offset, new_size)
+  subroutine hdf_set_even_offset_from_dataset(file_id, loc_id, dset_name, offset, new_size)
 
     integer(HID_T), intent(in) :: file_id, loc_id  !< location id
     character(len=*), intent(in) :: dset_name      !< dataset name
@@ -723,7 +728,24 @@ contains
         call MPI_Abort(mpi_comm, 1, mpi_ierr)
       end if
     end if
-  end subroutine hdf_set_even_offset
+  end subroutine hdf_set_even_offset_from_dataset
+
+  subroutine hdf_set_even_offset_from_number(total_count, nprocs, offset)
+    integer, intent(in) :: total_count
+    integer, intent(in) :: nprocs
+    integer :: offset(nprocs)
+
+    integer :: ii, jj, kk
+
+    kk = total_count - jj * nprocs
+    offset(1) = 0
+    do ii = 1,  kk
+      offset(ii+1) = offset(ii) + jj + 1
+    end do
+    do ii = kk + 1, nprocs-1
+      offset(ii+1) = offset(ii) + jj
+    end do
+  end subroutine hdf_set_even_offset_from_number
 
   !>  \brief Get the rank of a dataset
   subroutine hdf_get_rank(loc_id, dset_name, rank)
