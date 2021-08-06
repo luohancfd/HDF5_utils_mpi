@@ -6345,7 +6345,7 @@ contains
     integer, intent(out) :: array               ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6360,6 +6360,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -6377,7 +6378,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (is_parallel) then
       if (mpi_nrank .ne. mpi_nrank_old) then
         write(*, '(A)') "hdf_read_dataset_integer_0("//trim(dset_name)// &
@@ -6403,8 +6404,10 @@ contains
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array, &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -6430,7 +6433,7 @@ contains
     integer, intent(out) :: array(:)            ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6445,6 +6448,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -6462,7 +6466,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_integer_1("//trim(dset_name)//&
@@ -6516,12 +6520,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_1 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_integer_1 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -6534,12 +6538,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array(1:count_local(1)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -6565,7 +6571,7 @@ contains
     integer, intent(out) :: array(:,:)          ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6580,6 +6586,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -6597,7 +6604,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_integer_2("//trim(dset_name)//&
@@ -6651,12 +6658,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_2 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_integer_2 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -6669,12 +6676,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array(1:count_local(1),1:count_local(2)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -6700,7 +6709,7 @@ contains
     integer, intent(out) :: array(:,:,:)        ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6715,6 +6724,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -6732,7 +6742,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_integer_3("//trim(dset_name)//&
@@ -6786,12 +6796,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_3 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_integer_3 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -6804,12 +6814,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -6835,7 +6847,7 @@ contains
     integer, intent(out) :: array(:,:,:,:)      ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6850,6 +6862,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -6867,7 +6880,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_integer_4("//trim(dset_name)//&
@@ -6921,12 +6934,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_4 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_integer_4 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -6939,12 +6952,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -6970,7 +6985,7 @@ contains
     integer, intent(out) :: array(:,:,:,:,:)    ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -6985,6 +7000,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7002,7 +7018,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_integer_5("//trim(dset_name)//&
@@ -7056,12 +7072,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_5 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_integer_5 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7074,12 +7090,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7105,7 +7123,7 @@ contains
     integer, intent(out) :: array(:,:,:,:,:,:)  ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7120,6 +7138,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7137,7 +7156,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_integer_6("//trim(dset_name)//&
@@ -7191,12 +7210,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_integer_6 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_integer_6 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7209,12 +7228,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_INTEGER, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5),1:count_local(6)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7245,7 +7266,7 @@ contains
     real(sp), intent(out) :: array              ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7260,6 +7281,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7277,7 +7299,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (is_parallel) then
       if (mpi_nrank .ne. mpi_nrank_old) then
         write(*, '(A)') "hdf_read_dataset_real_0("//trim(dset_name)// &
@@ -7303,8 +7325,10 @@ contains
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array, &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7330,7 +7354,7 @@ contains
     real(sp), intent(out) :: array(:)           ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7345,6 +7369,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7362,7 +7387,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_real_1("//trim(dset_name)//&
@@ -7416,12 +7441,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_real_1 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_real_1 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7434,12 +7459,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array(1:count_local(1)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7465,7 +7492,7 @@ contains
     real(sp), intent(out) :: array(:,:)         ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7480,6 +7507,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7497,7 +7525,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_real_2("//trim(dset_name)//&
@@ -7551,12 +7579,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_real_2 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_real_2 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7569,12 +7597,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array(1:count_local(1),1:count_local(2)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7600,7 +7630,7 @@ contains
     real(sp), intent(out) :: array(:,:,:)       ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7615,6 +7645,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7632,7 +7663,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_real_3("//trim(dset_name)//&
@@ -7686,12 +7717,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_real_3 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_real_3 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7704,12 +7735,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7735,7 +7768,7 @@ contains
     real(sp), intent(out) :: array(:,:,:,:)     ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7750,6 +7783,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7767,7 +7801,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_real_4("//trim(dset_name)//&
@@ -7821,12 +7855,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_real_4 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_real_4 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7839,12 +7873,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -7870,7 +7906,7 @@ contains
     real(sp), intent(out) :: array(:,:,:,:,:)   ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -7885,6 +7921,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -7902,7 +7939,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_real_5("//trim(dset_name)//&
@@ -7956,12 +7993,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_real_5 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_real_5 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -7974,12 +8011,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8005,7 +8044,7 @@ contains
     real(sp), intent(out) :: array(:,:,:,:,:,:) ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8020,6 +8059,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8037,7 +8077,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_real_6("//trim(dset_name)//&
@@ -8091,12 +8131,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_real_6 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_real_6 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -8109,12 +8149,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_REAL, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_REAL, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5),1:count_local(6)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8145,7 +8187,7 @@ contains
     real(dp), intent(out) :: array              ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8160,6 +8202,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8177,7 +8220,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (is_parallel) then
       if (mpi_nrank .ne. mpi_nrank_old) then
         write(*, '(A)') "hdf_read_dataset_double_0("//trim(dset_name)// &
@@ -8203,8 +8246,10 @@ contains
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array, &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8230,7 +8275,7 @@ contains
     real(dp), intent(out) :: array(:)           ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8245,6 +8290,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8262,7 +8308,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_double_1("//trim(dset_name)//&
@@ -8316,12 +8362,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_double_1 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_double_1 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -8334,12 +8380,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array(1:count_local(1)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8365,7 +8413,7 @@ contains
     real(dp), intent(out) :: array(:,:)         ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8380,6 +8428,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8397,7 +8446,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_double_2("//trim(dset_name)//&
@@ -8451,12 +8500,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_double_2 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_double_2 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -8469,12 +8518,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array(1:count_local(1),1:count_local(2)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8500,7 +8551,7 @@ contains
     real(dp), intent(out) :: array(:,:,:)       ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8515,6 +8566,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8532,7 +8584,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_double_3("//trim(dset_name)//&
@@ -8586,12 +8638,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_double_3 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_double_3 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -8604,12 +8656,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8635,7 +8689,7 @@ contains
     real(dp), intent(out) :: array(:,:,:,:)     ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8650,6 +8704,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8667,7 +8722,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_double_4("//trim(dset_name)//&
@@ -8721,12 +8776,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_double_4 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_double_4 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -8739,12 +8794,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8770,7 +8827,7 @@ contains
     real(dp), intent(out) :: array(:,:,:,:,:)   ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8785,6 +8842,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8802,7 +8860,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_double_5("//trim(dset_name)//&
@@ -8856,12 +8914,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_double_5 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_double_5 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -8874,12 +8932,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -8905,7 +8965,7 @@ contains
     real(dp), intent(out) :: array(:,:,:,:,:,:) ! data to be read
 
     integer :: rank
-    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -8920,6 +8980,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -8937,7 +8998,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_double_6("//trim(dset_name)//&
@@ -8991,12 +9052,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_double_6 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_double_6 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9009,12 +9070,14 @@ contains
     if (.not. is_parallel) then
       call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, array, dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, H5T_NATIVE_DOUBLE, &
+                     array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5),1:count_local(6)), &
+                     count_local, hdferror, &
                      mem_space_id=mem_space_id,                 &
                      file_space_id=file_space_id,               &
                      xfer_prp=dplist_collective)
@@ -9045,7 +9108,7 @@ contains
     complex(dp), intent(out) :: array           ! data to be read
     real(dp) :: buffer(2)                       ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9060,6 +9123,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9077,7 +9141,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (is_parallel) then
       if (mpi_nrank .ne. mpi_nrank_old) then
         write(*, '(A)') "hdf_read_dataset_complex_double_0("//trim(dset_name)// &
@@ -9106,17 +9170,18 @@ contains
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(1), buffer(2), kind=dp)
+    array = &
+      cmplx(buffer(1), buffer(2), kind=dp)
 
     if (is_parallel) then
       deallocate(offset_glob, count_glob)
@@ -9138,7 +9203,7 @@ contains
     complex(dp), intent(out) :: array(:)        ! data to be read
     real(dp), allocatable, dimension(:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9153,6 +9218,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9170,7 +9236,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_complex_double_1("//trim(dset_name)//&
@@ -9224,12 +9290,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_1 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_complex_double_1 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9239,28 +9305,29 @@ contains
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
-    allocate (buffer(dimsm(1), 2))
+    allocate (buffer(count_local(1), 2))
     if (.not. is_parallel) then
       call h5dread_f(dset_id, complexd_field_id(1), buffer(:,1), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
       call h5dread_f(dset_id, complexd_field_id(2), buffer(:,2), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(:,1), buffer(:,2), kind=dp)
+    array(1:count_local(1)) = &
+      cmplx(buffer(:,1), buffer(:,2), kind=dp)
 
     deallocate (buffer)
     if (is_parallel) then
@@ -9283,7 +9350,7 @@ contains
     complex(dp), intent(out) :: array(:,:)      ! data to be read
     real(dp), allocatable, dimension(:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(2) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9298,6 +9365,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9315,7 +9383,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_complex_double_2("//trim(dset_name)//&
@@ -9369,12 +9437,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_2 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_complex_double_2 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9384,28 +9452,29 @@ contains
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
-    allocate (buffer(dimsm(1), dimsm(2), 2))
+    allocate (buffer(count_local(1), count_local(2), 2))
     if (.not. is_parallel) then
       call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,1), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
       call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,2), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(:,:,1), buffer(:,:,2), kind=dp)
+    array(1:count_local(1),1:count_local(2)) = &
+      cmplx(buffer(:,:,1), buffer(:,:,2), kind=dp)
 
     deallocate (buffer)
     if (is_parallel) then
@@ -9428,7 +9497,7 @@ contains
     complex(dp), intent(out) :: array(:,:,:)    ! data to be read
     real(dp), allocatable, dimension(:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(3) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9443,6 +9512,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9460,7 +9530,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_complex_double_3("//trim(dset_name)//&
@@ -9514,12 +9584,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_3 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_complex_double_3 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9529,28 +9599,29 @@ contains
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
-    allocate (buffer(dimsm(1), dimsm(2), dimsm(3), 2))
+    allocate (buffer(count_local(1), count_local(2), count_local(3), 2))
     if (.not. is_parallel) then
       call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,1), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
       call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,2), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(:,:,:,1), buffer(:,:,:,2), kind=dp)
+    array(1:count_local(1),1:count_local(2),1:count_local(3)) = &
+      cmplx(buffer(:,:,:,1), buffer(:,:,:,2), kind=dp)
 
     deallocate (buffer)
     if (is_parallel) then
@@ -9573,7 +9644,7 @@ contains
     complex(dp), intent(out) :: array(:,:,:,:)  ! data to be read
     real(dp), allocatable, dimension(:,:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(4) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9588,6 +9659,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9605,7 +9677,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_complex_double_4("//trim(dset_name)//&
@@ -9659,12 +9731,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_4 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_complex_double_4 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9674,28 +9746,29 @@ contains
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
-    allocate (buffer(dimsm(1), dimsm(2), dimsm(3), dimsm(4), 2))
+    allocate (buffer(count_local(1), count_local(2), count_local(3), count_local(4), 2))
     if (.not. is_parallel) then
       call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,1), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
       call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,2), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(:,:,:,:,1), buffer(:,:,:,:,2), kind=dp)
+    array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4)) = &
+      cmplx(buffer(:,:,:,:,1), buffer(:,:,:,:,2), kind=dp)
 
     deallocate (buffer)
     if (is_parallel) then
@@ -9718,7 +9791,7 @@ contains
     complex(dp), intent(out) :: array(:,:,:,:,:)! data to be read
     real(dp), allocatable, dimension(:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(5) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9733,6 +9806,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9750,7 +9824,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_complex_double_5("//trim(dset_name)//&
@@ -9804,12 +9878,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_5 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_complex_double_5 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9819,28 +9893,29 @@ contains
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
-    allocate (buffer(dimsm(1), dimsm(2), dimsm(3), dimsm(4), dimsm(5), 2))
+    allocate (buffer(count_local(1), count_local(2), count_local(3), count_local(4), count_local(5), 2))
     if (.not. is_parallel) then
       call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,1), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
       call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,2), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(:,:,:,:,:,1), buffer(:,:,:,:,:,2), kind=dp)
+    array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5)) = &
+      cmplx(buffer(:,:,:,:,:,1), buffer(:,:,:,:,:,2), kind=dp)
 
     deallocate (buffer)
     if (is_parallel) then
@@ -9863,7 +9938,7 @@ contains
     complex(dp), intent(out) :: array(:,:,:,:,:,:)! data to be read
     real(dp), allocatable, dimension(:,:,:,:,:,:,:) :: buffer ! buffer to save real and imag part
     integer :: rank
-    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local
+    integer(HSIZE_T),dimension(6) :: dimsf, dimsm, offset_local, count_local
     integer(HID_T) :: dset_id, file_space_id, mem_space_id
     integer :: processor_write, axis_write
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
@@ -9878,6 +9953,7 @@ contains
 
     ! get file_space dimension
     call hdf_get_dims(loc_id, dset_name, dimsf)
+    count_local = dimsf
 
     ! get stacked axis
     axis_write = -1
@@ -9895,7 +9971,7 @@ contains
       allocate(offset_glob(mpi_nrank), count_glob(mpi_nrank))
     end if
 
-    ! syntax check of offset and set offset_glob / count_glob
+    ! syntax check of offset and set offset_glob / count_glob / count_local
     if (present(offset)) then
       if (.not. is_parallel) then
         write(*,'(A)') "hdf_read_dataset_complex_double_6("//trim(dset_name)//&
@@ -9949,12 +10025,12 @@ contains
         end if
       end do
     else
+      count_local(axis_write) = count_glob(mpi_irank+1)
       do ii = 1, rank
-        jj = int(dimsf(ii))
-        if (ii == axis_write) jj = int(count_glob(mpi_irank+1))
-        if (dimsm(ii) .ne. jj) then
-          write(*, '(A, I2, I8)') "hdf_read_dataset_complex_double_6 ("//trim(dset_name)// &
-                          "): array size is wrong", dimsm(ii), jj
+        jj = count_local(ii)
+        if ((dimsm(ii) .lt. jj) .or. (ii .ne. axis_write .and. dimsm(ii) .ne. jj)) then
+          write(*, '(A, I2, A, I2, A, I8)') "hdf_read_dataset_complex_double_6 ("//trim(dset_name)// &
+                          "): array size is wrong axis=", ii, " memory siz=", dimsm(ii), " file size=", jj
           call MPI_Abort(mpi_comm, mpi_ierr)
         end if
       end do
@@ -9964,28 +10040,29 @@ contains
     call h5dopen_f(loc_id, dset_name, dset_id, hdferror)
 
     ! read dataset
-    allocate (buffer(dimsm(1), dimsm(2), dimsm(3), dimsm(4), dimsm(5), dimsm(6), 2))
+    allocate (buffer(count_local(1), count_local(2), count_local(3), count_local(4), count_local(5), count_local(6), 2))
     if (.not. is_parallel) then
       call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,:,1), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
       call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,:,2), &
                      dimsm, hdferror, xfer_prp=dplist_collective)
     else
-      call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)
+      call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)
       offset_local = 0
       offset_local(axis_write) = offset_glob(mpi_irank+1)
       call h5dget_space_f(dset_id, file_space_id, hdferror)
-      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, dimsm, hdferror)
-      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,:,1), dimsm, hdferror, &
+      call h5sselect_hyperslab_f(file_space_id, H5S_SELECT_SET_F, offset_local, count_local, hdferror)
+      call h5dread_f(dset_id, complexd_field_id(1), buffer(:,:,:,:,:,:,1), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
-      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,:,2), dimsm, hdferror, &
+      call h5dread_f(dset_id, complexd_field_id(2), buffer(:,:,:,:,:,:,2), count_local, hdferror, &
                      mem_space_id=mem_space_id,    &
                      file_space_id=file_space_id,  &
                      xfer_prp=dplist_collective)
     end if
-    array = cmplx(buffer(:,:,:,:,:,:,1), buffer(:,:,:,:,:,:,2), kind=dp)
+    array(1:count_local(1),1:count_local(2),1:count_local(3),1:count_local(4),1:count_local(5),1:count_local(6)) = &
+      cmplx(buffer(:,:,:,:,:,:,1), buffer(:,:,:,:,:,:,2), kind=dp)
 
     deallocate (buffer)
     if (is_parallel) then

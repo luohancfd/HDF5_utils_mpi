@@ -169,7 +169,7 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
     h5type = 'dtype_id'
     ftype = 'character(len=*)'
   else:
-    raise ValueError(f'Unkndown ftype {ftype_name}')
+    raise ValueError(f'Unknown ftype {ftype_name}')
 
   array_comma = ''
   buffer_indexing = ''
@@ -177,7 +177,6 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
     array_comma = ':,' * (rank - 1) + ':'
     buffer_indexing = array_comma + ','
 
-  buffer_size = ', '.join([f'dimsm({i})' for i in range(1, rank+1)])
 
   if rank == 0:
     declaration = f'{ftype}, intent(out) :: array'
@@ -196,21 +195,27 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
 
 
   dims_declaration = [
-    f'integer(HSIZE_T),dimension({rank}) :: dimsf, dimsm, offset_local',
+    f'integer(HSIZE_T),dimension({rank}) :: dimsf, dimsm, offset_local, count_local',
   ]
   if rank == 0:
     dims_declaration = [
-      f'integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local',
+      f'integer(HSIZE_T),dimension(1) :: dimsf, dimsm, offset_local, count_local',
     ]
   dims_declaration = '\n'.join([' '*nspace + i for i in dims_declaration])
 
 
-  mem_space_creation = ' '*(nspace+2) + 'call h5screate_simple_f(rank, dimsm, mem_space_id, hdferror)'
+  mem_space_creation = ' '*(nspace+2) + 'call h5screate_simple_f(rank, count_local, mem_space_id, hdferror)'
   if rank == 0:
     mem_space_creation = ' '*(nspace+2) + 'call h5screate_f(H5S_SCALAR_F, mem_space_id, hdferror)'
 
+  array_slicing = 'array'
+  if rank != 0:
+    w = ','.join([f'1:count_local({i})' for i in range(1, rank+1)])
+    array_slicing += f'({w})'
+
+  buffer_size = ', '.join([f'count_local({i})' for i in range(1, rank+1)])
   if ftype_name == 'complex_double':
-    read_string = read_complex_dataset_template.format(buffer_indexing=buffer_indexing, mem_space_creation=mem_space_creation)
+    read_string = read_complex_dataset_template.format(buffer_indexing=buffer_indexing, mem_space_creation=mem_space_creation, array_slicing=array_slicing)
     if rank != 0:
       read_string = read_string.split('\n')
       read_string = [f'    allocate (buffer({buffer_size}, 2))'] + read_string + [
@@ -218,7 +223,7 @@ def gen_read_dataset(ftype_name, rank, nspace=4):
       ]
       read_string = '\n'.join(read_string)
   else:
-    read_string = read_regular_dataset_template.format(h5type=h5type, mem_space_creation=mem_space_creation)
+    read_string = read_regular_dataset_template.format(h5type=h5type, mem_space_creation=mem_space_creation, array_slicing=array_slicing)
 
   if rank == 0:
     set_offset = configure_offset_scalar.format(ftype_name=ftype_name, rank=rank)

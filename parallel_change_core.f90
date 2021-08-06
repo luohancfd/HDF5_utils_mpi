@@ -3,7 +3,8 @@ PROGRAM DATASET
   ! Run this program with 6 cores
 
   use hdf5_utils_mpi, only : hdf_open_file, hdf_write_dataset, &
-    hdf_read_dataset, hdf_close_file, hdf_set_dims, hdf_get_rank, hdf_read_attribute
+    hdf_read_dataset, hdf_close_file, hdf_set_dims, hdf_get_rank, hdf_read_attribute, &
+    hdf_set_even_offset
 
   IMPLICIT NONE
 
@@ -16,7 +17,7 @@ PROGRAM DATASET
 
   INTEGER, ALLOCATABLE :: data0(:, :)   ! Data to write
   real(kind=8), ALLOCATABLE :: data1(:)   ! Data to write
-  integer, allocatable :: data2(:)
+  integer, allocatable :: data2(:,:), data22(:,:)
   complex(kind=8), allocatable :: data3(:, :)
 
   CHARACTER(len=20) :: data4
@@ -63,36 +64,9 @@ PROGRAM DATASET
   end if
   call MPI_Barrier(comm, mpierror)
 
-
-  ! data0==========================================
-  call hdf_set_dims(file_id, "data0", dims)
-  allocate(data0(dims(1), dims(2)))
-
-  call hdf_read_dataset(file_id, "data0", data0)
-  if (mpi_rank > 0) then
-    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
-  end if
-  write (*, *) "Rank=", mpi_rank, "data0=", data0
-  call flush (6)
-  if (mpi_rank < mpi_size - 1) then
-    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
-  end if
-
-  ! data1 ==================================
-  ! get the original dimension
-  call hdf_set_dims(file_id, "data1", dims)
-  allocate(data1(dims(1)))
-  call hdf_read_dataset(file_id, "data1", data1)
-  if (mpi_rank > 0) then
-    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
-  end if
-  write (*, '(A, I2, A, 20(F6.2, 2X))') "Rank=", mpi_rank, "data1=", data1
-  call flush (6)
-  if (mpi_rank < mpi_size - 1) then
-    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
-  end if
-
   ! data2 ====================================
+  ! This method dynamically set data2 buffer
+
   ! get the original dimension
   call hdf_set_dims(file_id, "data2", dims)
   ! get the axis that data is stacked, it should be 1 here
@@ -117,7 +91,7 @@ PROGRAM DATASET
     count_global(1:mpi_size-1) = offset_global(2:mpi_size) - offset_global(1:mpi_size-1)
 
     count_global(mpi_size) = dims(axis_write) - offset_global(mpi_size)
-    ! write(*,*) offset_global
+    write(*,*) offset_global
   end if
 
   ! Broadcast offset_global
@@ -127,22 +101,55 @@ PROGRAM DATASET
   call MPI_Scatter(count_global, 1, MPI_INTEGER, jj, 1, MPI_INTEGER, 0, comm, mpierror)
 
   ! we know axis_write=1 and data2 has rank=1
-  allocate(data2(jj))
+  allocate(data2(jj, dims(2)))
 
   ! read the datatset
   call hdf_read_dataset(file_id, "data2", data2, offset=offset_global)
   if (mpi_rank > 0) then
     call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
   end if
-  write (*, *) "Rank=", mpi_rank, "data2=", data2
+  write (*, *) "Rank=", mpi_rank, "data2="
+  do i = 1, jj
+    write(*,*) (data2(i,j), j=1,dims(2))
+  end do
+
   call flush (6)
   if (mpi_rank < mpi_size - 1) then
     call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
   end if
 
+
+  ! data22 ================ this method preset data22
+  call hdf_set_dims(file_id, "data2", dims)
+  call hdf_read_attribute(file_id, "data2", "axis_write", axis_write)
+
+  if (axis_write .eq. 1) then
+    ALLOCATE(data22(10, dims(2)))
+  end if
+  if (axis_write == 2) then
+     allocate(data22(dims(1), 10))
+  end if
+  data22 = -1
+  call hdf_set_even_offset(file_id, file_id, "data2", offset_global, 10)
+  call hdf_read_dataset(file_id, "data2", data22, offset=offset_global)
+  if (mpi_rank > 0) then
+    call MPI_Recv(ii, 1, MPI_INTEGER, mpi_rank - 1, MPI_ANY_TAG, MPI_COMM_WORLD, mpi_status, mpierror)
+  end if
+  write (*, *) "Rank=", mpi_rank, "data2="
+  do i = 1, 10
+    write(*,*) (data22(i,j), j=1,dims(2))
+  end do
+  call flush (6)
+  if (mpi_rank < mpi_size - 1) then
+    call MPI_Send(ii, 1, MPI_INTEGER, mpi_rank + 1, 1, MPI_COMM_WORLD, mpierror)
+  end if
+
+
+
+
   call hdf_close_file(file_id)
 
-  DEALLOCATE (data0, data1, data2, offset_global, count_global)
+  DEALLOCATE (data2, data22, offset_global, count_global)
 
   CALL MPI_FINALIZE(mpierror)
 

@@ -16,7 +16,7 @@ PROGRAM DATASET
 
   INTEGER, ALLOCATABLE :: data0(:, :)   ! Data to write
   real(kind=8), ALLOCATABLE :: data1(:)   ! Data to write
-  integer, allocatable :: data2(:)
+  integer, allocatable :: data2(:, :)
   complex(kind=8), allocatable :: data3(:, :)
 
   CHARACTER(len=20) :: data4
@@ -73,9 +73,11 @@ PROGRAM DATASET
   end do
 
   ! data2
-  allocate (data2((mpi_rank + 2)*2))
+  allocate (data2((mpi_rank + 2)*2, 5))
   do i = 1, (mpi_rank + 2)*2
-    data2(i) = i
+    do j = 1, 5
+    data2(i, j) = i + 10*j
+    end do
   end do
 
   ! data3
