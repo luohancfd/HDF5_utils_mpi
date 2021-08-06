@@ -43,6 +43,7 @@ module hdf5_utils_mpi
   public :: hdf_create_dataset
   public :: hdf_write_vector_to_dataset, hdf_read_vector_from_dataset
   public :: HID_T, hdf_set_print_messages, hdf_set_default_filter
+  public :: hdf_set_even_offset
 
   private :: hdf_preset_prop, hdf_close_prop
 
@@ -660,6 +661,69 @@ contains
     !write(*,'(A20,I0)') "h5gclose: ", hdferror
 
   end subroutine hdf_close_group
+
+  !>  \brief Set even offset for read_dataset
+  subroutine hdf_set_even_offset(file_id, loc_id, dset_name, offset, new_size)
+
+    integer(HID_T), intent(in) :: file_id, loc_id  !< location id
+    character(len=*), intent(in) :: dset_name      !< dataset name
+    !< size for the read buffer each processor can have different value
+    integer, allocatable :: offset(:)
+    integer, intent(in), optional :: new_size
+
+    integer :: mpi_nrank_, ii, jj, kk
+    integer, allocatable :: count_old(:), total_count
+
+    ! ignore whatever is set originally
+    if (allocated(offset)) then
+      deallocate(offset)
+    end if
+    allocate(offset(mpi_nrank))
+
+    call hdf_read_attribute(file_id, "", "mpi_nrank", mpi_nrank_)
+
+    ! sanity check
+    call hdf_read_attribute(loc_id, dset_name, "axis_write", ii)
+    if (ii == -1) then
+      write(*,'(A)') "-->hdf_set_even_offset: dataset ["//dset_name//"] is not written in parallel"
+      call MPI_Abort(mpi_comm, 1, mpi_ierr)
+    end if
+
+    ! get old data size
+    allocate(count_old(mpi_nrank_))
+    call hdf_read_attribute(loc_id, dset_name, "count", count_old)
+    total_count = sum(count_old)
+    deallocate(count_old)
+
+    ! calculate offset of the stacked axis
+    jj = floor(dble(total_count)/dble(mpi_nrank))
+    if (jj == 0) then
+        write(*,'(A)') "-->hdf_set_even_offset: some processor may get nothing"
+        call MPI_Abort(mpi_comm, 1, mpi_ierr)
+    end if
+
+    kk = total_count - jj * mpi_nrank
+    offset(1) = 0
+    do ii = 1,  kk
+      offset(ii+1) = offset(ii) + jj + 1
+    end do
+    do ii = kk + 1, mpi_nrank-1
+      offset(ii+1) = offset(ii) + jj
+    end do
+
+    ! sanity check whether we have enough space
+    if (present(new_size)) then
+      if (mpi_irank == mpi_nrank - 1) then
+        ii = total_count - offset(mpi_irank+1)
+      else
+        ii = offset(mpi_irank + 2) - offset(mpi_irank + 1)
+      end if
+      if (ii > new_size) then
+        write(*,'(A)') "-->hdf_set_even_offset: new_size is not enough for dataset ["//dset_name//"]"
+        call MPI_Abort(mpi_comm, 1, mpi_ierr)
+      end if
+    end if
+  end subroutine hdf_set_even_offset
 
   !>  \brief Get the rank of a dataset
   subroutine hdf_get_rank(loc_id, dset_name, rank)
