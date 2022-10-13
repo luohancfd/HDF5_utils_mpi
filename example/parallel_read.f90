@@ -52,9 +52,9 @@ program main
 		end if
 
 		if (mpi_rank+1 == mpi_size) then
-			num_particles(ii) = total_prtcl(1) - prtcl_offset(mpi_rank+1)
+			num_particles(ii) = total_prtcl(1) - prtcl_offset(mpi_rank)
 		else
-			num_particles(ii) = prtcl_offset(mpi_rank+2) - prtcl_offset(mpi_rank+1)
+			num_particles(ii) = prtcl_offset(mpi_rank+1) - prtcl_offset(mpi_rank)
 		end if
 		jj = num_particles(ii)
 

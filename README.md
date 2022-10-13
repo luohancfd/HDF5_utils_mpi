@@ -7,7 +7,7 @@ The aim of this library is to:
  - Abstract most of the HDF5 tyes.
  - Read/write datasets of multiple types and ranks.
    - Assumed reading/writing full arrays.
-   - Remove need to pass dimensions (allocation and consistency of dimensions is left to the user). 
+   - Remove need to pass dimensions (allocation and consistency of dimensions is left to the user).
  - Write/read attributes to file/group/datasets.
  - Provide the ability to create groups, and access datasets by either absolute or relative path.
  - Some auxiliary functions:
@@ -20,7 +20,7 @@ This is just a short summary to provide a basic understandig of the module.
 For a more detailed explaination, look at the code comments.
 If you have doxygen installed, `make docs` will produce an html output in `docs/html/index.html`.
 
-subroutine   | inputs   | description 
+subroutine   | inputs   | description
 :---- |  :---- |  :----
 `hdf_open_file` | `file_id`, `filename`, `STATUS`, `ACTION` | Opens file and return identifier
 `hdf_close_file` | `file_id` | Closes a hdf5 file
@@ -48,20 +48,20 @@ Here is a simple example of writing to a new HDF5 file:
 
 ```fortran
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id
-    
+
     integer :: ii, jj, kk, ll
     integer :: data0, data1(8), data2(4,6), data3(4,6,8), data4(4,6,8,10)
     real(sp) :: data2_sp(4,6)
     real(dp) :: data2_dp(4,6)
-    
+
     !
     call hdf_set_print_messages(.true.)
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='NEW')
-    
+
     ! write out some datasets
     call hdf_write_dataset(file_id, "data0", data0)
     call hdf_write_dataset(file_id, "data1", data1)
@@ -83,17 +83,17 @@ Here is a simple examle of reading from an HDF5 file:
 
 ```fortran
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id
-    
+
     integer :: data0, data1(8), data2(4,6), data3(4,6,8), data4(4,6,8,10)
     real(sp) :: data2_sp(4,6)
     real(dp) :: data2_dp(4,6)
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
 
-    ! read in some datasets 
+    ! read in some datasets
     call hdf_read_dataset(file_id, "data0", data0)
     call hdf_read_dataset(file_id, "data1", data1)
     call hdf_read_dataset(file_id, "data2", data2)
@@ -102,7 +102,7 @@ Here is a simple examle of reading from an HDF5 file:
 
     call hdf_read_dataset(file_id, "data2_sp", data2_sp)
     call hdf_read_dataset(file_id, "data2_dp", data2_dp)
-    
+
     ! close file
     call hdf_close_file(file_id)
 
@@ -115,18 +115,18 @@ The rank, dimension, and datatypes array should match that of the datasets in th
 Note that HDF5 will convert the datatype on reading. So based on the above example
 ```fortran
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id
     integer :: ii
-    
+
     integer :: data2(4,6)
     real(sp) :: data2_sp(4,6)
     real(dp) :: data2_dp(4,6)
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
 
-    ! read in some datasets 
+    ! read in some datasets
     call hdf_read_dataset(file_id, "data2_dp", data2)
     call hdf_read_dataset(file_id, "data2_dp", data2_sp)
     call hdf_read_dataset(file_id, "data2_dp", data2_dp)
@@ -140,28 +140,28 @@ Note that HDF5 will convert the datatype on reading. So based on the above examp
     do ii = 1,4
       write(*,'(10F8.2)') data2_dp(ii,:)
     enddo
-    
+
     ! close file
     call hdf_close_file(file_id)
 
 ```
 
-This example will read in from a double precision dataset into an integer, real, and double precision array. 
+This example will read in from a double precision dataset into an integer, real, and double precision array.
 Note that the integer array will be the floor of the double/real array.
 
 For writing, just convert the data array before writing using the built in int & real functions
 
 ### Chunking and compression
 
-An advanced and very useful feature of the HDF5 library is [chunking and compression](https://portal.hdfgroup.org/display/HDF5/Compressed+Datasets). 
-I have implemented a subset of this that I think is enough for my needs. 
-When writing the dataset, just pass the optional filter parameter (options are 'none', 'szip', 'gzip', and 'gzip+shuffle'). 
-Also, optionally there is the chucks parameter, which defined the size of data chunks in the dataset. 
+An advanced and very useful feature of the HDF5 library is [chunking and compression](https://portal.hdfgroup.org/display/HDF5/Compressed+Datasets).
+I have implemented a subset of this that I think is enough for my needs.
+When writing the dataset, just pass the optional filter parameter (options are 'none', 'szip', 'gzip', and 'gzip+shuffle').
+Also, optionally there is the chucks parameter, which defined the size of data chunks in the dataset.
 A great thing is, like converting datatypes, when reading no additional care needs to be taken because the HDF5 library will sort it out for you (see note below):
 
 ```fortran
     use hdf5_utils
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl_special.h5", STATUS='NEW')
 
@@ -179,10 +179,10 @@ A great thing is, like converting datatypes, when reading no additional care nee
     call hdf_close_file(file_id)
 ```
 
-Note: that the efficiency of the compression and the writing/reading speed depend heavily on you data and you use cases. 
+Note: that the efficiency of the compression and the writing/reading speed depend heavily on you data and you use cases.
 For instance, one of my uses is to write out 3D GCM data, and then read in select vertical profiles for an interpolation.
-When I chunk by vertical profile (1,1,103), the compression was very inefficient. 
-When I chunk by horizontal slab (90,45,1), the compression is the about same as if I just chunk the whole set together. 
+When I chunk by vertical profile (1,1,103), the compression was very inefficient.
+When I chunk by horizontal slab (90,45,1), the compression is the about same as if I just chunk the whole set together.
 So I have to determine for myself the tradoff between storage and speed.
 (In my case I chunk by horizontal slab so that each chunk is below the 1MB cache size, and read in a whole dataset and do multiple interpolations, until moving onto the next dataset).
 
@@ -193,21 +193,21 @@ The suggested use is for small items like the code version or run parameters:
 
 ```fortran
     use hdf5_utils
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READWRITE')
 
     ! write attribute to a dataset
     call hdf_write_attribute(file_id, "data1", "rank", 7)
     call hdf_write_attribute(file_id, "data4", "luckynumber", 1.618_dp)
-    
+
     ! write attribute to the file (and get version from Makefile)
     call date_and_time(DATE=date, TIME=time)
     call hdf_write_attribute(file_id, "", "date/time", date // ": " // time)
 
     ! close file
     call hdf_close_file(file_id)
-    
+
 ```
 
 The rank, dimension, and datatypes of the attribute in the HDF5 file correspond to the arrays passed to it.
@@ -222,12 +222,12 @@ When using group, you can access their contents using absolute or relative paths
 
 ```fortran
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id, group_id
-    
+
     ! open file
     call hdf_open_file(file_id, "outfile.h5", STATUS='NEW')
-    
+
     ! absolute access
     call hdf_create_group(file_id, "group1")
     call hdf_write_dataset(file_id, "group1/data1", data1)
@@ -241,10 +241,10 @@ When using group, you can access their contents using absolute or relative paths
     call hdf_write_attribute(group_id, "", "tag", "this is group 2")
     call hdf_write_attribute(group_id, "data2", "tag", "this is data2 in group 2")
     call hdf_close_group(group_id)
-    
+
     ! close file
     call hdf_close_file(file_id)
-    
+
 ```
 
 Notice in the relative path case, we can pass the `group_id` to read/write subroutines instead of the `file_id`.
@@ -258,11 +258,11 @@ These can be use, for example, to allocate an array before reading in the data
 
 ```fortran
     use hdf5_utils
-    
+
     integer(HID_T) :: file_id
     integer :: rank, dims(6)
     integer, allocatable :: test4(:,:,:,:)
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='READ')
 
@@ -270,7 +270,7 @@ These can be use, for example, to allocate an array before reading in the data
     call hdf_get_rank(file_id, "data4", rank)
     write(*,*) "rank(data4) = ", rank
 
-    ! get dimensions 
+    ! get dimensions
     call hdf_get_dims(file_id, "data4", dims)
     write(*,*) "dims(data4) = ", dims(1:rank)
 
@@ -280,7 +280,7 @@ These can be use, for example, to allocate an array before reading in the data
 
     ! close file
     call hdf_close_file(file_id)
-    
+
 ```
 
 
@@ -308,10 +308,10 @@ For instance, if a 2d array is a set of data vectors that we wish to perform a l
 
     integer :: j, k
     real(dp) :: array(4)
-    
+
     write(*,'(A)') ""
     write(*,'(A)') "Test writing out by column"
-    
+
     ! open file
     call hdf_open_file(file_id, "test_hl.h5", STATUS='OLD', ACTION='WRITE')
 
@@ -328,8 +328,13 @@ For instance, if a 2d array is a set of data vectors that we wish to perform a l
 
     call hdf_read_vector_from_dataset(file_id, "data3", (/1,1/), array)
     write(*,*) array
-    
+
     ! close file
     call hdf_close_file(file_id)
 
 ```
+## Copyright
+
+Copyright (c) 2017-2019 Justin Erwin
+
+Copyright (c) 2020      Han Luo

@@ -55,11 +55,11 @@ module hdf5_utils_mpi
   !>   - string (scalar and 1d-2d arrays)
   !>   - complex double number (compound data type, "r"/"i" for real and imaginary part, scalar and 1d-6d arrays)
   !>
-  !>  \param[in] loc_id     local id in file, e.g. file_id
+  !>  \param[in] loc_id     local id in file, e.g. file_id, group_id
   !>  \param[in] dset_name  name of dataset, NOTE: HDF5 assumes the dataset doesn't exist before !!
   !>  \param[in] array      data array to be written
-  !>  \param[in] chunks     (optional) chunk size for dataset
-  !>  \param[in] filter     (optional) filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
+  !>  \param[in] chunks     (optional, deprecated) chunk size for dataset
+  !>  \param[in] filter     (optional, deprecated) filter to use ('none', 'szip', 'gzip', 'gzip+shuffle')
   !>  \param[in] processor  (optional, default=-1) processor that provides the data, -1 if the data is the same on all processors.
   !>
   !>  if processor != -1, the following options become useless
@@ -133,9 +133,9 @@ module hdf5_utils_mpi
   !>   - integers (scalar and 1d-6d arrays)
   !>   - doubles (scalar and 1d-6d arrays)
   !>   - reals (scalar and 1d-6d arrays)
-  !   - string (scalar and 1d-6d arrays)
+  !>   - string (scalar and 1d-6d arrays)
   !>
-  !>  \param[in] loc_d      local id in file
+  !>  \param[in] loc_id     local id in file, e.g. file_id, group_id
   !>  \param[in] dset_name  name of dataset
   !>  \param[in] offset     position within the dataset
   !>  \param[in] vector     data array to be written
@@ -152,10 +152,19 @@ module hdf5_utils_mpi
   !>   - doubles (scalar and 1d-6d arrays)
   !>   - reals (scalar and 1d-6d arrays)
   !>   - string (scalar and 1d-2d arrays)
+  !>  Limited supported types: doesn't support read in parallel
+  !>   - complex double number (compound data type, "r"/"i" for real and imaginary part, scalar and 1d-6d arrays)
   !>
-  !>  \param[in]  loc_d      local id in file
+  !>  \param[in]  loc_id     local id in file, e.g. file_id, group_id
   !>  \param[in]  dset_name  name of dataset
-  !>  \param[out] array      data array to be read
+  !>  \param[out] array      array to read data into
+  !>  \param[in]  offset     (optional) offset of the portion of data in file
+  !>                         for each processor when reading in parallel. If
+  !>                         data is being read with different number of processors
+  !>                         than originally written, you must provide this argument.
+  !>                         You may use hdf_set_even_offset to set it
+  !>  \param[in]  non_parallel (optional, default: .false.) set true to read the whole
+  !>                           dataset into each processor even if it was written by part
   interface hdf_read_dataset
     module procedure hdf_read_dataset_integer_0
     module procedure hdf_read_dataset_integer_1
@@ -222,7 +231,7 @@ module hdf5_utils_mpi
   !>   - doubles (scalar and 1d arrays)
   !>   - string (1d array of characters)
   !>
-  !>  \param[in] loc_id     local id in file
+  !>  \param[in] loc_id     local id in file, e.g. file_id, group_id
   !>  \param[in] obj_name   name of object to be attached to (if left blank, just use loc_id)
   !>  \param[in] attr_name  name of attribute to be added
   !>  \param[in] array      attribute data to be written
@@ -254,7 +263,7 @@ module hdf5_utils_mpi
   !>   - doubles (scalar and 1d arrays)
   !>   - string (1d array of characters)
   !>
-  !>  \param[in] loc_id     local id in file
+  !>  \param[in] loc_id     local id in file, e.g. file_id, group_id
   !>  \param[in] obj_name   name of object to be attached to (if left blank, just use loc_id)
   !>  \param[in] attr_name  name of attribute to be added
   !>  \param[in] array      attribute data to be written
@@ -670,11 +679,11 @@ contains
   !>  \brief Set even offset for read_dataset
   subroutine hdf_set_even_offset_from_dataset(file_id, loc_id, dset_name, offset, new_size)
 
-    integer(HID_T), intent(in) :: file_id, loc_id  !< location id
+    integer(HID_T), intent(in) :: file_id !< file id created with hdf_open_file
+    integer(HID_T), intent(in) :: loc_id  !< location id created with hdf_open_group or file_id
     character(len=*), intent(in) :: dset_name      !< dataset name
-    !< size for the read buffer each processor can have different value
-    integer :: offset(:)
-    integer, intent(in), optional :: new_size
+    integer,intent(inout) :: offset(:)  !< new offset to read the dataset appropriately
+    integer, intent(in), optional :: new_size !< (optional) new size of data on this processor, used only for consistency check
 
     integer :: mpi_nrank_, ii, jj, kk
     integer, allocatable :: count_old(:), total_count

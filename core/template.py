@@ -19,7 +19,7 @@ write_single_value_template = '''  subroutine hdf_write_dataset_{ftype_name}_0(l
     integer :: ii
 {additonal_delcaration}
     if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_write_dataset_{ftype_name}_0: "//trim(dset_name)
+      write (*, '(A, I2, A)') "Processor ", mpi_irank, "--->hdf_write_dataset_{ftype_name}_0: "//trim(dset_name)
     end if
 
     !
@@ -122,7 +122,7 @@ write_array_template = '''  subroutine hdf_write_dataset_{ftype_name}_{rank}(loc
     integer(HSIZE_T), allocatable :: offset_glob(:), count_glob(:)
 {additonal_delcaration}
     if (hdf_print_messages) then
-      write (*, '(A)') "--->hdf_write_dataset_{ftype_name}_{rank}: "//trim(dset_name)
+      write (*, '(A, I2, A)') "Processor ",mpi_irank,"--->hdf_write_dataset_{ftype_name}_{rank}: "//trim(dset_name)
     end if
 
     ! set filter
@@ -148,6 +148,10 @@ write_array_template = '''  subroutine hdf_write_dataset_{ftype_name}_{rank}(loc
     ! set rank and dims
     rank = {rank}
     dimsm = shape(array, KIND=HSIZE_T)
+    if (hdf_print_messages) then
+      write (*, '(A, I2, A, {rank}(I5,2X))') "Processor ", mpi_irank, &
+        "--->hdf_write_dataset_{ftype_name}_{rank}: "//trim(dset_name)//" size = ", (dimsm(ii), ii=1,{rank})
+    end if
     if (processor_write .ne. -1) then
       call MPI_Bcast(dimsm, rank, mpi_hsize_t, processor_write, mpi_comm, mpi_ierr)
     end if

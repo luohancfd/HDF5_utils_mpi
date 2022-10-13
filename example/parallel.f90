@@ -117,7 +117,7 @@ PROGRAM DATASET
   end do
 
   ! ================ Write ==============================
-
+  ! call hdf_set_print_messages(.true.)
   call hdf_open_file(file_id, "test_hl.h5", STATUS='NEW')
 
   ! write data0 with value on processor0
